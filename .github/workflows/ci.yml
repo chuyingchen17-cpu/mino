@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: swift --version
+      - name: Run tests
+        run: Scripts/test.sh
+      - name: Build release app bundle
+        run: MINO_BUILD_CONFIGURATION=release Scripts/build-app.sh
+      - name: Validate bundle metadata
+        run: plutil -lint .build/Mino.app/Contents/Info.plist

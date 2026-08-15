@@ -25,12 +25,18 @@ let package = Package(
             dependencies: ["MinoDomain"],
             path: "Sources/MinoPresentation"
         ),
+        .target(
+            name: "MinoInfrastructure",
+            dependencies: ["MinoDomain"],
+            path: "Sources/MinoInfrastructure"
+        ),
         .executableTarget(
             name: "MinoApp",
             dependencies: [
                 "MinoDomain",
                 "MinoRuntime",
-                "MinoPresentation"
+                "MinoPresentation",
+                "MinoInfrastructure"
             ],
             path: "Sources/MinoApp"
         ),
@@ -43,6 +49,11 @@ let package = Package(
             name: "MinoRuntimeTests",
             dependencies: ["MinoDomain", "MinoRuntime"],
             path: "Tests/MinoRuntimeTests"
+        ),
+        .testTarget(
+            name: "MinoInfrastructureTests",
+            dependencies: ["MinoDomain", "MinoInfrastructure"],
+            path: "Tests/MinoInfrastructureTests"
         )
     ]
 )

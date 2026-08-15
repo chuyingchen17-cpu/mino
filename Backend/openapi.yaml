@@ -1,0 +1,139 @@
+openapi: 3.1.0
+info:
+  title: Mino Backend API
+  version: 0.1.0
+  description: Initial contract reserved by the macOS client foundation.
+servers:
+  - url: https://api.example.com/mino/v1
+    description: Placeholder only; configure the real endpoint at build or launch time.
+paths:
+  /health:
+    get:
+      operationId: checkHealth
+      summary: Check API compatibility and availability
+      responses:
+        "200":
+          description: Service health
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /interactions:
+    post:
+      operationId: sendInteraction
+      summary: Deliver an idempotent interaction to the paired pet
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Mino-Client
+          in: header
+          required: true
+          schema:
+            type: string
+            const: macos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractionCommand"
+      responses:
+        "200":
+          description: Accepted interaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractionReceiptEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  responses:
+    APIError:
+      description: Stable machine-readable error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+  schemas:
+    BackendHealth:
+      type: object
+      additionalProperties: false
+      required: [status, apiVersion]
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, offline]
+        apiVersion:
+          type: string
+    HealthEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/BackendHealth"
+    InteractionCommand:
+      type: object
+      additionalProperties: false
+      required: [idempotencyKey, kind, senderPetID, recipientPetID, clientCreatedAt]
+      properties:
+        idempotencyKey:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [kiss, flower_gift]
+        senderPetID:
+          type: string
+          minLength: 1
+        recipientPetID:
+          type: string
+          minLength: 1
+        clientCreatedAt:
+          type: string
+          format: date-time
+    InteractionReceipt:
+      type: object
+      additionalProperties: false
+      required: [interactionID, acceptedAt]
+      properties:
+        interactionID:
+          type: string
+        acceptedAt:
+          type: string
+          format: date-time
+    InteractionReceiptEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/InteractionReceipt"
+    APIErrorBody:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/APIErrorBody"

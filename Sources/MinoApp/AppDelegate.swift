@@ -1,17 +1,28 @@
 import AppKit
 import MinoDomain
+import MinoInfrastructure
 import MinoPresentation
 import MinoRuntime
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let services: ServiceContainer
     private var world: PetWorld?
     private var petWindows: [PetID: PetWindowController] = [:]
     private let effectWindows = EffectWindowController()
     private let demoSequence = DemoSequenceController()
     private var statusItem: NSStatusItem?
+    private var backendHealthTask: Task<Void, Never>?
+
+    init(services: ServiceContainer) {
+        self.services = services
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        MinoLog.lifecycle.info(
+            "Mino launching with backend mode: \(self.services.configuration.backend.mode.rawValue, privacy: .public)"
+        )
         let visibleFrame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         let baseline = visibleFrame.minY + 105
         let initialPets = [
@@ -90,12 +101,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+        checkRemoteBackendIfConfigured()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        backendHealthTask?.cancel()
         demoSequence.stop()
         world?.stop()
         NotificationCenter.default.removeObserver(self)
+        MinoLog.lifecycle.info("Mino terminated")
     }
 
     private func setupStatusItem() {
@@ -184,5 +198,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func screenConfigurationChanged() {
         demoSequence.stop()
         world?.restorePetsToVisibleScreens()
+    }
+
+    private func checkRemoteBackendIfConfigured() {
+        guard services.configuration.backend.mode == .remote else { return }
+        let backend = services.backend
+        backendHealthTask = Task {
+            do {
+                let health = try await backend.checkHealth()
+                MinoLog.backend.info(
+                    "Backend health: \(health.status.rawValue, privacy: .public), API \(health.apiVersion, privacy: .public)"
+                )
+            } catch {
+                MinoLog.backend.error(
+                    "Backend health check failed: \(String(describing: error), privacy: .public)"
+                )
+            }
+        }
     }
 }

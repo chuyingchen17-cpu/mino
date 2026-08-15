@@ -1,0 +1,15 @@
+{
+  "indentation": {
+    "spaces": 4
+  },
+  "lineLength": 120,
+  "respectsExistingLineBreaks": true,
+  "rules": {
+    "DoNotUseSemicolons": true,
+    "FileScopedDeclarationPrivacy": true,
+    "NoBlockComments": true,
+    "OrderedImports": true,
+    "UseEarlyExits": true
+  },
+  "version": 1
+}
