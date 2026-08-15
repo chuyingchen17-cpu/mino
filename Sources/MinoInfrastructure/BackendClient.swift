@@ -98,12 +98,18 @@ public actor HTTPBackendService: BackendService {
 }
 
 public enum BackendServiceFactory {
-    public static func make(configuration: BackendConfiguration) -> any BackendService {
+    public static func make(
+        configuration: BackendConfiguration,
+        tokenProvider: any AccessTokenProvider = AnonymousAccessTokenProvider()
+    ) -> any BackendService {
         switch configuration.mode {
         case .offline:
             OfflineBackendService(apiVersion: configuration.apiVersion)
         case .remote:
-            HTTPBackendService(configuration: configuration)
+            HTTPBackendService(
+                configuration: configuration,
+                tokenProvider: tokenProvider
+            )
         }
     }
 }

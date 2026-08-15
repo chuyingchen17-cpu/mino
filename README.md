@@ -28,6 +28,8 @@ Sources/
   MinoRuntime/         宠物世界、移动和互动状态机
   MinoPresentation/    AppKit / SpriteKit 窗口与渲染
   MinoInfrastructure/  配置、日志和后端客户端
+  MinoSecurity/        Keychain 会话凭证
+  MinoPersistence/     情侣快照与离线互动队列
   MinoApp/             应用入口与依赖组装
 Tests/                 按模块拆分的测试
 Backend/openapi.yaml   预留的 v1 后端契约
@@ -47,10 +49,10 @@ MINO_API_VERSION=v1 \
 Scripts/build-app.sh
 ```
 
-构建脚本会把以上非敏感配置写入产物的 Info.plist；直接运行可执行文件时，环境变量仍可在启动时覆盖它们。未来访问令牌必须由 Keychain 支持的 `AccessTokenProvider` 提供，不能写入仓库、Info.plist 或日志。
+构建脚本会把以上非敏感配置写入产物的 Info.plist；直接运行可执行文件时，环境变量仍可在启动时覆盖它们。访问令牌通过 Keychain 支持的 `AccessTokenProvider` 读取，不能写入仓库、Info.plist、本地 JSON 或日志。
 
 ## 当前边界
 
-已有：原生双窗口桌宠、组合式形象、互动状态机、离线 Demo、模块化工程、HTTP 后端适配层、CI 和签名预留。
+已有：原生双窗口桌宠、组合式形象、互动状态机、离线 Demo、模块化工程、HTTP 后端适配层、Keychain 会话仓库、版本化本地快照、离线互动 Outbox、CI 和签名预留。
 
-尚未实现：正式账号/配对、Keychain 会话、服务端同步、持久化、推送或实时通道、正式素材流水线、发行与自动更新。
+尚未实现：正式登录/配对界面、Token 刷新接口、服务端同步协调器、推送或实时通道、正式素材流水线、发行与自动更新。

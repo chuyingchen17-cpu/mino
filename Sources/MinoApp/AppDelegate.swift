@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let demoSequence = DemoSequenceController()
     private var statusItem: NSStatusItem?
     private var backendHealthTask: Task<Void, Never>?
+    private var localStateBootstrapTask: Task<Void, Never>?
 
     init(services: ServiceContainer) {
         self.services = services
@@ -21,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MinoLog.lifecycle.info(
-            "Mino launching with backend mode: \(self.services.configuration.backend.mode.rawValue, privacy: .public)"
+            "Mino launching with backend mode: \(self.services.configuration.backend.mode.rawValue, privacy: .public), storage: \(self.services.storageMode.rawValue, privacy: .public)"
         )
         let visibleFrame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         let baseline = visibleFrame.minY + 105
@@ -101,10 +102,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+        bootstrapLocalState()
         checkRemoteBackendIfConfigured()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        localStateBootstrapTask?.cancel()
         backendHealthTask?.cancel()
         demoSequence.stop()
         world?.stop()
@@ -212,6 +215,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 MinoLog.backend.error(
                     "Backend health check failed: \(String(describing: error), privacy: .public)"
+                )
+            }
+        }
+    }
+
+    private func bootstrapLocalState() {
+        let sessionStore = services.sessionStore
+        let coupleSnapshotStore = services.coupleSnapshotStore
+        let interactionOutbox = services.interactionOutbox
+        localStateBootstrapTask = Task {
+            do {
+                async let credential = sessionStore.load()
+                async let snapshot = coupleSnapshotStore.load()
+                async let pendingCount = interactionOutbox.pendingCount()
+                let state = try await (credential, snapshot, pendingCount)
+                MinoLog.lifecycle.info(
+                    "Local state ready; signed in: \(state.0 != nil), paired: \(state.1 != nil), pending interactions: \(state.2)"
+                )
+            } catch {
+                MinoLog.lifecycle.error(
+                    "Local state bootstrap failed without deleting data: \(String(describing: error), privacy: .public)"
                 )
             }
         }

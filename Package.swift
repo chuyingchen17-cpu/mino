@@ -30,13 +30,28 @@ let package = Package(
             dependencies: ["MinoDomain"],
             path: "Sources/MinoInfrastructure"
         ),
+        .target(
+            name: "MinoSecurity",
+            dependencies: ["MinoDomain"],
+            path: "Sources/MinoSecurity",
+            linkerSettings: [
+                .linkedFramework("Security")
+            ]
+        ),
+        .target(
+            name: "MinoPersistence",
+            dependencies: ["MinoDomain"],
+            path: "Sources/MinoPersistence"
+        ),
         .executableTarget(
             name: "MinoApp",
             dependencies: [
                 "MinoDomain",
                 "MinoRuntime",
                 "MinoPresentation",
-                "MinoInfrastructure"
+                "MinoInfrastructure",
+                "MinoSecurity",
+                "MinoPersistence"
             ],
             path: "Sources/MinoApp"
         ),
@@ -54,6 +69,16 @@ let package = Package(
             name: "MinoInfrastructureTests",
             dependencies: ["MinoDomain", "MinoInfrastructure"],
             path: "Tests/MinoInfrastructureTests"
+        ),
+        .testTarget(
+            name: "MinoSecurityTests",
+            dependencies: ["MinoDomain", "MinoSecurity"],
+            path: "Tests/MinoSecurityTests"
+        ),
+        .testTarget(
+            name: "MinoPersistenceTests",
+            dependencies: ["MinoDomain", "MinoPersistence"],
+            path: "Tests/MinoPersistenceTests"
         )
     ]
 )

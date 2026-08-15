@@ -18,7 +18,16 @@ enum MinoApplication {
             )
             configuration = .offline
         }
-        let delegate = AppDelegate(services: .live(configuration: configuration))
+        let services: ServiceContainer
+        do {
+            services = try .live(configuration: configuration)
+        } catch {
+            MinoLog.lifecycle.fault(
+                "Persistent services unavailable; using ephemeral stores: \(String(describing: error), privacy: .public)"
+            )
+            services = .ephemeral(configuration: configuration)
+        }
+        let delegate = AppDelegate(services: services)
 
         retainedDelegate = delegate
         application.delegate = delegate
