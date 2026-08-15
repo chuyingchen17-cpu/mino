@@ -55,7 +55,7 @@ final class PetWindowController {
     private let panel: PetPanel
     private let scene: PetScene
 
-    init(id: PetID, tint: NSColor, onMoved: @escaping (CGPoint) -> Void) {
+    init(id: PetID, onMoved: @escaping (CGPoint) -> Void) {
         self.id = id
         panel = PetPanel(
             contentRect: CGRect(origin: .zero, size: Self.windowSize),
@@ -67,7 +67,7 @@ final class PetWindowController {
         let view = PetInteractionView(frame: CGRect(origin: .zero, size: Self.windowSize))
         view.allowsTransparency = true
         view.preferredFramesPerSecond = 30
-        scene = PetScene(size: Self.windowSize, tint: tint)
+        scene = PetScene(size: Self.windowSize)
         view.presentScene(scene)
         view.onMoved = onMoved
         view.onClicked = { [weak scene] in scene?.reactToClick() }

@@ -22,6 +22,7 @@ struct PetRuntimeState: Sendable {
     var position: CGPoint
     var facing: PetFacing
     var activity: PetActivity
+    var avatar: AvatarRecipe
 }
 
 enum WorldMath {
@@ -100,6 +101,13 @@ final class PetWorld {
         }
     }
 
+    func togglePartnerAppearance() {
+        guard var partner = pets[.partner] else { return }
+        partner.avatar = partner.avatar == .partner ? .partnerAlternate : .partner
+        pets[.partner] = partner
+        publish()
+    }
+
     private func scheduleAmbientWalks() {
         guard targets.isEmpty else { return }
         for id in PetID.allCases where Double.random(in: 0...1) < 0.45 {
@@ -166,4 +174,3 @@ final class PetWorld {
         onStateChange?(pets)
     }
 }
-

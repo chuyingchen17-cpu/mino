@@ -4,30 +4,17 @@ import SpriteKit
 @MainActor
 final class PetScene: SKScene {
     private let root = SKNode()
-    private let body = SKShapeNode(circleOfRadius: 43)
-    private let leftEye = SKShapeNode(circleOfRadius: 4)
-    private let rightEye = SKShapeNode(circleOfRadius: 4)
+    private let avatar = PetAvatarNode()
     private var lastActivity: PetActivity?
 
-    init(size: CGSize, tint: NSColor) {
+    override init(size: CGSize) {
         super.init(size: size)
         scaleMode = .resizeFill
         backgroundColor = .clear
 
         root.position = CGPoint(x: size.width / 2, y: size.height / 2 - 4)
         addChild(root)
-
-        body.fillColor = tint
-        body.strokeColor = tint.blended(withFraction: 0.25, of: .black) ?? .black
-        body.lineWidth = 3
-        root.addChild(body)
-
-        for (eye, x) in [(leftEye, -15.0), (rightEye, 15.0)] {
-            eye.fillColor = .black
-            eye.strokeColor = .clear
-            eye.position = CGPoint(x: x, y: 9)
-            body.addChild(eye)
-        }
+        root.addChild(avatar)
     }
 
     required init?(coder aDecoder: NSCoder) {
@@ -35,8 +22,8 @@ final class PetScene: SKScene {
     }
 
     func render(_ state: PetRuntimeState) {
-        let facingScale: CGFloat = state.facing == .right ? 1 : -1
-        body.xScale = facingScale
+        avatar.apply(state.avatar)
+        avatar.setFacing(state.facing)
 
         guard lastActivity != state.activity else { return }
         lastActivity = state.activity
@@ -69,4 +56,3 @@ final class PetScene: SKScene {
         root.run(pulse, withKey: "click")
     }
 }
-

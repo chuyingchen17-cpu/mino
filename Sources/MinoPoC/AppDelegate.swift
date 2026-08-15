@@ -14,13 +14,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 id: .mine,
                 position: CGPoint(x: visibleFrame.midX - 95, y: baseline),
                 facing: .right,
-                activity: .idle
+                activity: .idle,
+                avatar: .mine
             ),
             PetRuntimeState(
                 id: .partner,
                 position: CGPoint(x: visibleFrame.midX + 95, y: baseline),
                 facing: .left,
-                activity: .idle
+                activity: .idle,
+                avatar: .partner
             )
         ]
 
@@ -30,10 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ?? visibleFrame
         }
 
-        petWindows[.mine] = PetWindowController(id: .mine, tint: .systemPink) { [weak world] position in
+        petWindows[.mine] = PetWindowController(id: .mine) { [weak world] position in
             world?.movePet(.mine, to: position)
         }
-        petWindows[.partner] = PetWindowController(id: .partner, tint: .systemTeal) { [weak world] position in
+        petWindows[.partner] = PetWindowController(id: .partner) { [weak world] position in
             world?.movePet(.partner, to: position)
         }
 
@@ -65,6 +67,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         walkItem.target = self
         menu.addItem(walkItem)
 
+        let avatarItem = NSMenuItem(
+            title: "Debug: Change Partner Avatar",
+            action: #selector(togglePartnerAppearance),
+            keyEquivalent: "a"
+        )
+        avatarItem.target = self
+        menu.addItem(avatarItem)
+
         let kissItem = NSMenuItem(title: "Debug: Kiss (next step)", action: nil, keyEquivalent: "")
         kissItem.isEnabled = false
         menu.addItem(kissItem)
@@ -79,5 +89,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func walkPets() {
         world?.walkAll()
+    }
+
+    @objc
+    private func togglePartnerAppearance() {
+        world?.togglePartnerAppearance()
     }
 }

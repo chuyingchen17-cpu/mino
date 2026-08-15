@@ -28,3 +28,11 @@ func movementUsesDeltaTime() {
     #expect(result.point == CGPoint(x: 10, y: 0))
     #expect(!result.arrived)
 }
+
+@Test
+func alternateAvatarChangesIndependentParts() {
+    #expect(AvatarRecipe.partner.bodyColor != AvatarRecipe.partnerAlternate.bodyColor)
+    #expect(AvatarRecipe.partner.eyeStyle != AvatarRecipe.partnerAlternate.eyeStyle)
+    #expect(AvatarRecipe.partner.hat != AvatarRecipe.partnerAlternate.hat)
+    #expect(AvatarRecipe.partner.accessory != AvatarRecipe.partnerAlternate.accessory)
+}
