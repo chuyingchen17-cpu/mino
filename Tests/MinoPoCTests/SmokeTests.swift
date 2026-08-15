@@ -41,16 +41,20 @@ func alternateAvatarChangesIndependentParts() {
 func kissInteractionApproachesThenEmitsEffectAndCompletes() {
     var mine = PetRuntimeState(
         id: .mine,
+        displayName: "奶糖",
         position: CGPoint(x: 100, y: 100),
         facing: .left,
         activity: .idle,
+        emotion: .content,
         avatar: .mine
     )
     var partner = PetRuntimeState(
         id: .partner,
+        displayName: "团子",
         position: CGPoint(x: 500, y: 100),
         facing: .right,
         activity: .idle,
+        emotion: .content,
         avatar: .partner
     )
     var interaction = KissInteractionSession(
@@ -69,9 +73,13 @@ func kissInteractionApproachesThenEmitsEffectAndCompletes() {
     #expect(partner.facing == .left)
     #expect(mine.activity == .interacting)
     #expect(partner.activity == .interacting)
+    #expect(mine.emotion == .shy)
+    #expect(partner.emotion == .happy)
 
     let completion = interaction.advance(mine: &mine, partner: &partner, deltaTime: 2)
     #expect(completion.completed)
     #expect(mine.activity == .idle)
     #expect(partner.activity == .idle)
+    #expect(mine.emotion == .content)
+    #expect(partner.emotion == .content)
 }

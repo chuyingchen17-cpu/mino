@@ -49,7 +49,7 @@ final class PetInteractionView: SKView {
 
 @MainActor
 final class PetWindowController {
-    static let windowSize = CGSize(width: 150, height: 150)
+    static let windowSize = CGSize(width: 170, height: 180)
 
     let id: PetID
     private let panel: PetPanel

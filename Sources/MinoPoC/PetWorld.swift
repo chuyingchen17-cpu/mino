@@ -17,11 +17,19 @@ enum PetActivity: Equatable, Sendable {
     case interacting
 }
 
+enum PetEmotion: Equatable, Sendable {
+    case content
+    case happy
+    case shy
+}
+
 struct PetRuntimeState: Sendable {
     let id: PetID
+    var displayName: String
     var position: CGPoint
     var facing: PetFacing
     var activity: PetActivity
+    var emotion: PetEmotion
     var avatar: AvatarRecipe
 }
 
@@ -93,6 +101,7 @@ final class PetWorld {
         targets[id] = nil
         pet.position = position
         pet.activity = .idle
+        pet.emotion = .content
         pets[id] = pet
         publish()
     }
@@ -149,6 +158,7 @@ final class PetWorld {
         targets[id] = target
         pet.facing = target.x >= pet.position.x ? .right : .left
         pet.activity = .walking
+        pet.emotion = .content
         pets[id] = pet
         publish()
         ensureMotionTimer()

@@ -10,6 +10,7 @@ final class PetAvatarNode: SKNode {
     private let accessoryLayer = SKNode()
 
     private var recipe: AvatarRecipe?
+    private var emotion: PetEmotion?
 
     override init() {
         super.init()
@@ -31,15 +32,19 @@ final class PetAvatarNode: SKNode {
         nil
     }
 
-    func apply(_ recipe: AvatarRecipe) {
-        guard self.recipe != recipe else { return }
-        self.recipe = recipe
+    func apply(_ recipe: AvatarRecipe, emotion: PetEmotion) {
+        if self.recipe != recipe {
+            self.recipe = recipe
+            rebuildSpecies(recipe.species, color: recipe.bodyColor.nsColor)
+            rebuildBody(color: recipe.bodyColor.nsColor)
+            rebuildHat(recipe.hat)
+            rebuildAccessory(recipe.accessory)
+        }
 
-        rebuildSpecies(recipe.species, color: recipe.bodyColor.nsColor)
-        rebuildBody(color: recipe.bodyColor.nsColor)
-        rebuildFace(recipe.eyeStyle)
-        rebuildHat(recipe.hat)
-        rebuildAccessory(recipe.accessory)
+        if self.emotion != emotion || faceLayer.children.isEmpty {
+            self.emotion = emotion
+            rebuildFace(recipe.eyeStyle, emotion: emotion)
+        }
     }
 
     func setFacing(_ facing: PetFacing) {
@@ -91,10 +96,11 @@ final class PetAvatarNode: SKNode {
         bodyLayer.addChild(body)
     }
 
-    private func rebuildFace(_ style: AvatarEyeStyle) {
+    private func rebuildFace(_ style: AvatarEyeStyle, emotion: PetEmotion) {
         faceLayer.removeAllChildren()
 
-        switch style {
+        let resolvedStyle: AvatarEyeStyle = emotion == .happy ? .happy : style
+        switch resolvedStyle {
         case .dots:
             for x in [-15.0, 15.0] {
                 let eye = SKShapeNode(circleOfRadius: 4)
@@ -125,6 +131,15 @@ final class PetAvatarNode: SKNode {
         mouth.lineWidth = 2.5
         mouth.lineCap = .round
         faceLayer.addChild(mouth)
+
+        guard emotion != .content else { return }
+        for x in [-29.0, 29.0] {
+            let cheek = SKShapeNode(ellipseOf: CGSize(width: 13, height: 7))
+            cheek.fillColor = NSColor.systemPink.withAlphaComponent(emotion == .shy ? 0.72 : 0.42)
+            cheek.strokeColor = .clear
+            cheek.position = CGPoint(x: x, y: -7)
+            faceLayer.addChild(cheek)
+        }
     }
 
     private func rebuildHat(_ style: AvatarHatStyle) {
@@ -201,4 +216,3 @@ final class PetAvatarNode: SKNode {
         }
     }
 }
-

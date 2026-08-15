@@ -13,16 +13,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let initialPets = [
             PetRuntimeState(
                 id: .mine,
+                displayName: "奶糖",
                 position: CGPoint(x: visibleFrame.midX - 95, y: baseline),
                 facing: .right,
                 activity: .idle,
+                emotion: .content,
                 avatar: .mine
             ),
             PetRuntimeState(
                 id: .partner,
+                displayName: "团子",
                 position: CGPoint(x: visibleFrame.midX + 95, y: baseline),
                 facing: .left,
                 activity: .idle,
+                emotion: .content,
                 avatar: .partner
             )
         ]

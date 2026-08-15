@@ -75,6 +75,8 @@ struct KissInteractionSession: Sendable {
             phase = .holdingPose
             mine.activity = .interacting
             partner.activity = .interacting
+            mine.emotion = .shy
+            partner.emotion = .happy
             return InteractionAdvance(cue: .kissHeart(position: effectPosition))
 
         case .holdingPose:
@@ -86,6 +88,8 @@ struct KissInteractionSession: Sendable {
             phase = .completed
             mine.activity = .idle
             partner.activity = .idle
+            mine.emotion = .content
+            partner.emotion = .content
             return InteractionAdvance(completed: true)
 
         case .completed:
@@ -93,4 +97,3 @@ struct KissInteractionSession: Sendable {
         }
     }
 }
-
