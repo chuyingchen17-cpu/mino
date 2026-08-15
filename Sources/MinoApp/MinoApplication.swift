@@ -1,7 +1,7 @@
 import AppKit
 
 @main
-enum MinoPoCApplication {
+enum MinoApplication {
     @MainActor
     private static var retainedDelegate: AppDelegate?
 

@@ -2,10 +2,12 @@ import AppKit
 import SpriteKit
 
 @MainActor
-final class EffectWindowController {
+package final class EffectWindowController {
     private var panels: [NSPanel] = []
 
-    func showKissHeart(at position: CGPoint) {
+    package init() {}
+
+    package func showKissHeart(at position: CGPoint) {
         let size = CGSize(width: 130, height: 120)
         present(
             scene: KissEffectScene(size: size),
@@ -15,7 +17,7 @@ final class EffectWindowController {
         )
     }
 
-    func showFlowerGift(at position: CGPoint) {
+    package func showFlowerGift(at position: CGPoint) {
         let size = CGSize(width: 180, height: 145)
         present(
             scene: FlowerEffectScene(size: size),

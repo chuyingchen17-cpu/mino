@@ -3,23 +3,46 @@
 import PackageDescription
 
 let package = Package(
-    name: "MinoPoC",
+    name: "Mino",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "MinoPoC", targets: ["MinoPoC"])
+        .executable(name: "Mino", targets: ["MinoApp"])
     ],
     targets: [
+        .target(
+            name: "MinoDomain",
+            path: "Sources/MinoDomain"
+        ),
+        .target(
+            name: "MinoRuntime",
+            dependencies: ["MinoDomain"],
+            path: "Sources/MinoRuntime"
+        ),
+        .target(
+            name: "MinoPresentation",
+            dependencies: ["MinoDomain"],
+            path: "Sources/MinoPresentation"
+        ),
         .executableTarget(
-            name: "MinoPoC",
-            path: "Sources/MinoPoC"
+            name: "MinoApp",
+            dependencies: [
+                "MinoDomain",
+                "MinoRuntime",
+                "MinoPresentation"
+            ],
+            path: "Sources/MinoApp"
         ),
         .testTarget(
-            name: "MinoPoCTests",
-            dependencies: ["MinoPoC"],
-            path: "Tests/MinoPoCTests"
+            name: "MinoDomainTests",
+            dependencies: ["MinoDomain"],
+            path: "Tests/MinoDomainTests"
+        ),
+        .testTarget(
+            name: "MinoRuntimeTests",
+            dependencies: ["MinoDomain", "MinoRuntime"],
+            path: "Tests/MinoRuntimeTests"
         )
     ]
 )
-

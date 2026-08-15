@@ -1,4 +1,7 @@
 import AppKit
+import MinoDomain
+import MinoPresentation
+import MinoRuntime
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {

@@ -1,40 +1,9 @@
 import CoreGraphics
 import Foundation
+import MinoDomain
 
-enum PetID: String, CaseIterable, Sendable {
-    case mine
-    case partner
-}
-
-enum PetFacing: Equatable, Sendable {
-    case left
-    case right
-}
-
-enum PetActivity: Equatable, Sendable {
-    case idle
-    case walking
-    case interacting
-}
-
-enum PetEmotion: Equatable, Sendable {
-    case content
-    case happy
-    case shy
-}
-
-struct PetRuntimeState: Sendable {
-    let id: PetID
-    var displayName: String
-    var position: CGPoint
-    var facing: PetFacing
-    var activity: PetActivity
-    var emotion: PetEmotion
-    var avatar: AvatarRecipe
-}
-
-enum WorldMath {
-    static func movedPoint(
+public enum WorldMath {
+    public static func movedPoint(
         from origin: CGPoint,
         toward target: CGPoint,
         speed: CGFloat,
@@ -60,11 +29,11 @@ enum WorldMath {
 }
 
 @MainActor
-final class PetWorld {
-    typealias VisibleFrameProvider = (CGPoint) -> CGRect
+public final class PetWorld {
+    public typealias VisibleFrameProvider = (CGPoint) -> CGRect
 
-    private(set) var pets: [PetID: PetRuntimeState]
-    var onStateChange: (([PetID: PetRuntimeState]) -> Void)?
+    public private(set) var pets: [PetID: PetRuntimeState]
+    public var onStateChange: (([PetID: PetRuntimeState]) -> Void)?
 
     private let visibleFrameProvider: VisibleFrameProvider
     private var targets: [PetID: CGPoint] = [:]
@@ -72,14 +41,14 @@ final class PetWorld {
     private var motionTimer: Timer?
     private var ambientTimer: Timer?
     private var lastMotionTime = ProcessInfo.processInfo.systemUptime
-    var onInteractionCue: ((InteractionCue) -> Void)?
+    public var onInteractionCue: ((InteractionCue) -> Void)?
 
-    init(pets: [PetRuntimeState], visibleFrameProvider: @escaping VisibleFrameProvider) {
+    public init(pets: [PetRuntimeState], visibleFrameProvider: @escaping VisibleFrameProvider) {
         self.pets = Dictionary(uniqueKeysWithValues: pets.map { ($0.id, $0) })
         self.visibleFrameProvider = visibleFrameProvider
     }
 
-    func start() {
+    public func start() {
         publish()
         ambientTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -89,14 +58,14 @@ final class PetWorld {
         ambientTimer?.tolerance = 0.6
     }
 
-    func stop() {
+    public func stop() {
         ambientTimer?.invalidate()
         motionTimer?.invalidate()
         ambientTimer = nil
         motionTimer = nil
     }
 
-    func movePet(_ id: PetID, to position: CGPoint) {
+    public func movePet(_ id: PetID, to position: CGPoint) {
         guard activeInteraction == nil, var pet = pets[id] else { return }
         targets[id] = nil
         pet.position = position
@@ -106,14 +75,14 @@ final class PetWorld {
         publish()
     }
 
-    func walkAll() {
+    public func walkAll() {
         guard activeInteraction == nil else { return }
         for id in PetID.allCases {
             scheduleWalk(for: id)
         }
     }
 
-    func triggerKiss() {
+    public func triggerKiss() {
         guard
             activeInteraction == nil,
             let mine = pets[.mine],
@@ -134,7 +103,7 @@ final class PetWorld {
         ensureMotionTimer()
     }
 
-    func triggerFlowerGift() {
+    public func triggerFlowerGift() {
         guard
             activeInteraction == nil,
             let mine = pets[.mine],
@@ -155,7 +124,7 @@ final class PetWorld {
         ensureMotionTimer()
     }
 
-    func resetForDemo() {
+    public func resetForDemo() {
         guard let anchor = pets[.mine]?.position else { return }
         let frame = visibleFrameProvider(anchor).insetBy(dx: 120, dy: 105)
         guard frame.width > 0, frame.height > 0 else { return }
@@ -178,7 +147,7 @@ final class PetWorld {
         publish()
     }
 
-    func walkApartForDemo() {
+    public func walkApartForDemo() {
         guard
             activeInteraction == nil,
             let mine = pets[.mine],
@@ -192,7 +161,7 @@ final class PetWorld {
         scheduleWalk(for: .partner, to: CGPoint(x: centerX + 180, y: partner.position.y))
     }
 
-    func restorePetsToVisibleScreens() {
+    public func restorePetsToVisibleScreens() {
         targets.removeAll()
         activeInteraction = nil
 
@@ -211,7 +180,7 @@ final class PetWorld {
         publish()
     }
 
-    func togglePartnerAppearance() {
+    public func togglePartnerAppearance() {
         guard var partner = pets[.partner] else { return }
         partner.avatar = partner.avatar == .partner ? .partnerAlternate : .partner
         pets[.partner] = partner

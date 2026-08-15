@@ -1,31 +1,37 @@
 import CoreGraphics
 import Foundation
+import MinoDomain
 
-enum InteractionCue: Equatable, Sendable {
+public enum InteractionCue: Equatable, Sendable {
     case kissHeart(position: CGPoint)
     case flowerGift(position: CGPoint)
 }
 
-struct InteractionAdvance: Sendable {
-    var cue: InteractionCue?
-    var completed = false
+public struct InteractionAdvance: Sendable {
+    public var cue: InteractionCue?
+    public var completed = false
+
+    public init(cue: InteractionCue? = nil, completed: Bool = false) {
+        self.cue = cue
+        self.completed = completed
+    }
 }
 
-struct KissInteractionSession: Sendable {
-    enum Phase: Equatable, Sendable {
+public struct KissInteractionSession: Sendable {
+    public enum Phase: Equatable, Sendable {
         case approaching
         case holdingPose
         case completed
     }
 
-    private(set) var phase: Phase = .approaching
-    let mineTarget: CGPoint
-    let partnerTarget: CGPoint
-    let effectPosition: CGPoint
+    public private(set) var phase: Phase = .approaching
+    public let mineTarget: CGPoint
+    public let partnerTarget: CGPoint
+    public let effectPosition: CGPoint
 
     private var poseElapsed: TimeInterval = 0
 
-    init(mine: PetRuntimeState, partner: PetRuntimeState, visibleFrame: CGRect) {
+    public init(mine: PetRuntimeState, partner: PetRuntimeState, visibleFrame: CGRect) {
         let inset = visibleFrame.insetBy(dx: 120, dy: 100)
         let rawCenter = CGPoint(
             x: (mine.position.x + partner.position.x) / 2,
@@ -42,7 +48,7 @@ struct KissInteractionSession: Sendable {
         effectPosition = CGPoint(x: center.x, y: center.y + 42)
     }
 
-    mutating func advance(
+    public mutating func advance(
         mine: inout PetRuntimeState,
         partner: inout PetRuntimeState,
         deltaTime: TimeInterval
@@ -99,21 +105,21 @@ struct KissInteractionSession: Sendable {
     }
 }
 
-struct FlowerInteractionSession: Sendable {
-    enum Phase: Equatable, Sendable {
+public struct FlowerInteractionSession: Sendable {
+    public enum Phase: Equatable, Sendable {
         case approaching
         case offering
         case completed
     }
 
-    private(set) var phase: Phase = .approaching
-    let mineTarget: CGPoint
-    let partnerTarget: CGPoint
-    let effectPosition: CGPoint
+    public private(set) var phase: Phase = .approaching
+    public let mineTarget: CGPoint
+    public let partnerTarget: CGPoint
+    public let effectPosition: CGPoint
 
     private var poseElapsed: TimeInterval = 0
 
-    init(mine: PetRuntimeState, partner: PetRuntimeState, visibleFrame: CGRect) {
+    public init(mine: PetRuntimeState, partner: PetRuntimeState, visibleFrame: CGRect) {
         let inset = visibleFrame.insetBy(dx: 130, dy: 110)
         let rawCenter = CGPoint(
             x: (mine.position.x + partner.position.x) / 2,
@@ -129,7 +135,7 @@ struct FlowerInteractionSession: Sendable {
         effectPosition = CGPoint(x: center.x + 4, y: center.y + 34)
     }
 
-    mutating func advance(
+    public mutating func advance(
         mine: inout PetRuntimeState,
         partner: inout PetRuntimeState,
         deltaTime: TimeInterval

@@ -1,4 +1,5 @@
 import AppKit
+import MinoDomain
 import SpriteKit
 
 @MainActor
@@ -214,5 +215,16 @@ final class PetAvatarNode: SKNode {
             charm.position = CGPoint(x: 0, y: -33)
             accessoryLayer.addChild(charm)
         }
+    }
+}
+
+private extension AvatarColor {
+    var nsColor: NSColor {
+        NSColor(
+            calibratedRed: red,
+            green: green,
+            blue: blue,
+            alpha: alpha
+        )
     }
 }

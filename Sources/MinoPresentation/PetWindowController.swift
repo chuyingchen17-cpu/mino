@@ -1,4 +1,5 @@
 import AppKit
+import MinoDomain
 import SpriteKit
 
 @MainActor
@@ -48,14 +49,14 @@ final class PetInteractionView: SKView {
 }
 
 @MainActor
-final class PetWindowController {
-    static let windowSize = CGSize(width: 170, height: 180)
+package final class PetWindowController {
+    package static let windowSize = CGSize(width: 170, height: 180)
 
-    let id: PetID
+    package let id: PetID
     private let panel: PetPanel
     private let scene: PetScene
 
-    init(
+    package init(
         id: PetID,
         onMoved: @escaping (CGPoint) -> Void,
         onClicked: (() -> Void)? = nil
@@ -95,11 +96,11 @@ final class PetWindowController {
         panel.isReleasedWhenClosed = false
     }
 
-    func show() {
+    package func show() {
         panel.orderFrontRegardless()
     }
 
-    func render(_ state: PetRuntimeState) {
+    package func render(_ state: PetRuntimeState) {
         let origin = CGPoint(
             x: state.position.x - Self.windowSize.width / 2,
             y: state.position.y - Self.windowSize.height / 2
