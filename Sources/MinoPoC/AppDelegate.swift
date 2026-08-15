@@ -4,6 +4,7 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var world: PetWorld?
     private var petWindows: [PetID: PetWindowController] = [:]
+    private let effectWindows = EffectWindowController()
     private var statusItem: NSStatusItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -32,16 +33,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ?? visibleFrame
         }
 
-        petWindows[.mine] = PetWindowController(id: .mine) { [weak world] position in
-            world?.movePet(.mine, to: position)
-        }
-        petWindows[.partner] = PetWindowController(id: .partner) { [weak world] position in
-            world?.movePet(.partner, to: position)
-        }
+        petWindows[.mine] = PetWindowController(
+            id: .mine,
+            onMoved: { [weak world] position in
+                world?.movePet(.mine, to: position)
+            },
+            onClicked: { [weak world] in
+                world?.triggerKiss()
+            }
+        )
+        petWindows[.partner] = PetWindowController(
+            id: .partner,
+            onMoved: { [weak world] position in
+                world?.movePet(.partner, to: position)
+            },
+            onClicked: { [weak world] in
+                world?.triggerKiss()
+            }
+        )
 
         world.onStateChange = { [weak self] states in
             for (id, state) in states {
                 self?.petWindows[id]?.render(state)
+            }
+        }
+        world.onInteractionCue = { [weak self] cue in
+            switch cue {
+            case .kissHeart(let position):
+                self?.effectWindows.showKissHeart(at: position)
             }
         }
 
@@ -75,8 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         avatarItem.target = self
         menu.addItem(avatarItem)
 
-        let kissItem = NSMenuItem(title: "Debug: Kiss (next step)", action: nil, keyEquivalent: "")
-        kissItem.isEnabled = false
+        let kissItem = NSMenuItem(title: "Debug: Kiss", action: #selector(kissPets), keyEquivalent: "k")
+        kissItem.target = self
         menu.addItem(kissItem)
         menu.addItem(.separator())
 
@@ -94,5 +113,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func togglePartnerAppearance() {
         world?.togglePartnerAppearance()
+    }
+
+    @objc
+    private func kissPets() {
+        world?.triggerKiss()
     }
 }

@@ -6,7 +6,7 @@ enum PetID: String, CaseIterable, Sendable {
     case partner
 }
 
-enum PetFacing: Sendable {
+enum PetFacing: Equatable, Sendable {
     case left
     case right
 }
@@ -60,9 +60,11 @@ final class PetWorld {
 
     private let visibleFrameProvider: VisibleFrameProvider
     private var targets: [PetID: CGPoint] = [:]
+    private var activeInteraction: KissInteractionSession?
     private var motionTimer: Timer?
     private var ambientTimer: Timer?
     private var lastMotionTime = ProcessInfo.processInfo.systemUptime
+    var onInteractionCue: ((InteractionCue) -> Void)?
 
     init(pets: [PetRuntimeState], visibleFrameProvider: @escaping VisibleFrameProvider) {
         self.pets = Dictionary(uniqueKeysWithValues: pets.map { ($0.id, $0) })
@@ -87,7 +89,7 @@ final class PetWorld {
     }
 
     func movePet(_ id: PetID, to position: CGPoint) {
-        guard var pet = pets[id], pet.activity != .interacting else { return }
+        guard activeInteraction == nil, var pet = pets[id] else { return }
         targets[id] = nil
         pet.position = position
         pet.activity = .idle
@@ -96,9 +98,29 @@ final class PetWorld {
     }
 
     func walkAll() {
+        guard activeInteraction == nil else { return }
         for id in PetID.allCases {
             scheduleWalk(for: id)
         }
+    }
+
+    func triggerKiss() {
+        guard
+            activeInteraction == nil,
+            let mine = pets[.mine],
+            let partner = pets[.partner]
+        else {
+            return
+        }
+
+        targets.removeAll()
+        let visibleFrame = visibleFrameProvider(mine.position)
+        activeInteraction = KissInteractionSession(
+            mine: mine,
+            partner: partner,
+            visibleFrame: visibleFrame
+        )
+        ensureMotionTimer()
     }
 
     func togglePartnerAppearance() {
@@ -109,7 +131,7 @@ final class PetWorld {
     }
 
     private func scheduleAmbientWalks() {
-        guard targets.isEmpty else { return }
+        guard targets.isEmpty, activeInteraction == nil else { return }
         for id in PetID.allCases where Double.random(in: 0...1) < 0.45 {
             scheduleWalk(for: id)
         }
@@ -147,6 +169,20 @@ final class PetWorld {
         let deltaTime = min(0.1, now - lastMotionTime)
         lastMotionTime = now
 
+        if activeInteraction != nil {
+            tickInteraction(deltaTime: deltaTime)
+        } else {
+            tickAutonomousMotion(deltaTime: deltaTime)
+        }
+
+        publish()
+        if targets.isEmpty, activeInteraction == nil {
+            motionTimer?.invalidate()
+            motionTimer = nil
+        }
+    }
+
+    private func tickAutonomousMotion(deltaTime: TimeInterval) {
         for (id, target) in targets {
             guard var pet = pets[id] else { continue }
             let result = WorldMath.movedPoint(
@@ -162,12 +198,30 @@ final class PetWorld {
             }
             pets[id] = pet
         }
+    }
 
-        publish()
-        if targets.isEmpty {
-            motionTimer?.invalidate()
-            motionTimer = nil
+    private func tickInteraction(deltaTime: TimeInterval) {
+        guard
+            var interaction = activeInteraction,
+            var mine = pets[.mine],
+            var partner = pets[.partner]
+        else {
+            activeInteraction = nil
+            return
         }
+
+        let advance = interaction.advance(
+            mine: &mine,
+            partner: &partner,
+            deltaTime: deltaTime
+        )
+        pets[.mine] = mine
+        pets[.partner] = partner
+
+        if let cue = advance.cue {
+            onInteractionCue?(cue)
+        }
+        activeInteraction = advance.completed ? nil : interaction
     }
 
     private func publish() {

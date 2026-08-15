@@ -28,6 +28,9 @@ final class PetScene: SKScene {
         guard lastActivity != state.activity else { return }
         lastActivity = state.activity
         root.removeAction(forKey: "activity")
+        root.position = CGPoint(x: size.width / 2, y: size.height / 2 - 4)
+        root.xScale = 1
+        root.yScale = 1
 
         switch state.activity {
         case .idle:

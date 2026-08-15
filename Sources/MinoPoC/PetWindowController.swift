@@ -55,7 +55,11 @@ final class PetWindowController {
     private let panel: PetPanel
     private let scene: PetScene
 
-    init(id: PetID, onMoved: @escaping (CGPoint) -> Void) {
+    init(
+        id: PetID,
+        onMoved: @escaping (CGPoint) -> Void,
+        onClicked: (() -> Void)? = nil
+    ) {
         self.id = id
         panel = PetPanel(
             contentRect: CGRect(origin: .zero, size: Self.windowSize),
@@ -70,7 +74,10 @@ final class PetWindowController {
         scene = PetScene(size: Self.windowSize)
         view.presentScene(scene)
         view.onMoved = onMoved
-        view.onClicked = { [weak scene] in scene?.reactToClick() }
+        view.onClicked = { [weak scene] in
+            scene?.reactToClick()
+            onClicked?()
+        }
 
         panel.contentView = view
         panel.title = id == .mine ? "Mino Pet: Mine" : "Mino Pet: Partner"
