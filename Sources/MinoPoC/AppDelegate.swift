@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var world: PetWorld?
     private var petWindows: [PetID: PetWindowController] = [:]
     private let effectWindows = EffectWindowController()
+    private let demoSequence = DemoSequenceController()
     private var statusItem: NSStatusItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -39,19 +40,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         petWindows[.mine] = PetWindowController(
             id: .mine,
-            onMoved: { [weak world] position in
+            onMoved: { [weak self, weak world] position in
+                self?.demoSequence.stop()
                 world?.movePet(.mine, to: position)
             },
-            onClicked: { [weak world] in
+            onClicked: { [weak self, weak world] in
+                self?.demoSequence.stop()
                 world?.triggerKiss()
             }
         )
         petWindows[.partner] = PetWindowController(
             id: .partner,
-            onMoved: { [weak world] position in
+            onMoved: { [weak self, weak world] position in
+                self?.demoSequence.stop()
                 world?.movePet(.partner, to: position)
             },
-            onClicked: { [weak world] in
+            onClicked: { [weak self, weak world] in
+                self?.demoSequence.stop()
                 world?.triggerKiss()
             }
         )
@@ -65,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch cue {
             case .kissHeart(let position):
                 self?.effectWindows.showKissHeart(at: position)
+            case .flowerGift(let position):
+                self?.effectWindows.showFlowerGift(at: position)
             }
         }
 
@@ -74,53 +81,105 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.world = world
         world.start()
         setupStatusItem()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenConfigurationChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        demoSequence.stop()
         world?.stop()
+        NotificationCenter.default.removeObserver(self)
     }
 
     private func setupStatusItem() {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.title = "♡"
-        statusItem.button?.toolTip = "Mino PoC"
+        statusItem.button?.toolTip = "Mino 情侣桌宠 Demo"
 
         let menu = NSMenu()
-        let walkItem = NSMenuItem(title: "Debug: Walk", action: #selector(walkPets), keyEquivalent: "w")
+        let identityItem = NSMenuItem(title: "奶糖  ♡  团子", action: nil, keyEquivalent: "")
+        identityItem.isEnabled = false
+        menu.addItem(identityItem)
+
+        let demoItem = NSMenuItem(title: "播放完整 Demo", action: #selector(playDemo), keyEquivalent: "d")
+        demoItem.target = self
+        menu.addItem(demoItem)
+        menu.addItem(.separator())
+
+        let kissItem = NSMenuItem(title: "亲亲", action: #selector(kissPets), keyEquivalent: "k")
+        kissItem.target = self
+        menu.addItem(kissItem)
+
+        let flowerItem = NSMenuItem(title: "送花", action: #selector(giveFlower), keyEquivalent: "f")
+        flowerItem.target = self
+        menu.addItem(flowerItem)
+
+        let walkItem = NSMenuItem(title: "一起散步", action: #selector(walkPets), keyEquivalent: "w")
         walkItem.target = self
         menu.addItem(walkItem)
 
         let avatarItem = NSMenuItem(
-            title: "Debug: Change Partner Avatar",
+            title: "给 TA 换装",
             action: #selector(togglePartnerAppearance),
             keyEquivalent: "a"
         )
         avatarItem.target = self
         menu.addItem(avatarItem)
 
-        let kissItem = NSMenuItem(title: "Debug: Kiss", action: #selector(kissPets), keyEquivalent: "k")
-        kissItem.target = self
-        menu.addItem(kissItem)
+        let resetItem = NSMenuItem(title: "重置位置", action: #selector(resetDemo), keyEquivalent: "r")
+        resetItem.target = self
+        menu.addItem(resetItem)
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit Mino PoC", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "退出 Mino", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quitItem)
         statusItem.menu = menu
         self.statusItem = statusItem
     }
 
     @objc
+    private func playDemo() {
+        guard let world else { return }
+        demoSequence.play(in: world)
+    }
+
+    @objc
     private func walkPets() {
+        demoSequence.stop()
         world?.walkAll()
     }
 
     @objc
     private func togglePartnerAppearance() {
+        demoSequence.stop()
         world?.togglePartnerAppearance()
     }
 
     @objc
     private func kissPets() {
+        demoSequence.stop()
         world?.triggerKiss()
+    }
+
+    @objc
+    private func giveFlower() {
+        demoSequence.stop()
+        world?.triggerFlowerGift()
+    }
+
+    @objc
+    private func resetDemo() {
+        demoSequence.stop()
+        world?.resetForDemo()
+    }
+
+    @objc
+    private func screenConfigurationChanged() {
+        demoSequence.stop()
+        world?.restorePetsToVisibleScreens()
     }
 }

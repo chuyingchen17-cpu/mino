@@ -68,7 +68,7 @@ final class PetWorld {
 
     private let visibleFrameProvider: VisibleFrameProvider
     private var targets: [PetID: CGPoint] = [:]
-    private var activeInteraction: KissInteractionSession?
+    private var activeInteraction: ActiveInteraction?
     private var motionTimer: Timer?
     private var ambientTimer: Timer?
     private var lastMotionTime = ProcessInfo.processInfo.systemUptime
@@ -124,12 +124,91 @@ final class PetWorld {
 
         targets.removeAll()
         let visibleFrame = visibleFrameProvider(mine.position)
-        activeInteraction = KissInteractionSession(
-            mine: mine,
-            partner: partner,
-            visibleFrame: visibleFrame
+        activeInteraction = .kiss(
+            KissInteractionSession(
+                mine: mine,
+                partner: partner,
+                visibleFrame: visibleFrame
+            )
         )
         ensureMotionTimer()
+    }
+
+    func triggerFlowerGift() {
+        guard
+            activeInteraction == nil,
+            let mine = pets[.mine],
+            let partner = pets[.partner]
+        else {
+            return
+        }
+
+        targets.removeAll()
+        let visibleFrame = visibleFrameProvider(mine.position)
+        activeInteraction = .flower(
+            FlowerInteractionSession(
+                mine: mine,
+                partner: partner,
+                visibleFrame: visibleFrame
+            )
+        )
+        ensureMotionTimer()
+    }
+
+    func resetForDemo() {
+        guard let anchor = pets[.mine]?.position else { return }
+        let frame = visibleFrameProvider(anchor).insetBy(dx: 120, dy: 105)
+        guard frame.width > 0, frame.height > 0 else { return }
+
+        targets.removeAll()
+        activeInteraction = nil
+        let center = CGPoint(x: frame.midX, y: frame.minY + min(35, frame.height / 2))
+        updatePet(.mine) { pet in
+            pet.position = CGPoint(x: center.x - 150, y: center.y)
+            pet.facing = .right
+            pet.activity = .idle
+            pet.emotion = .content
+        }
+        updatePet(.partner) { pet in
+            pet.position = CGPoint(x: center.x + 150, y: center.y)
+            pet.facing = .left
+            pet.activity = .idle
+            pet.emotion = .content
+        }
+        publish()
+    }
+
+    func walkApartForDemo() {
+        guard
+            activeInteraction == nil,
+            let mine = pets[.mine],
+            let partner = pets[.partner]
+        else {
+            return
+        }
+
+        let centerX = (mine.position.x + partner.position.x) / 2
+        scheduleWalk(for: .mine, to: CGPoint(x: centerX - 180, y: mine.position.y))
+        scheduleWalk(for: .partner, to: CGPoint(x: centerX + 180, y: partner.position.y))
+    }
+
+    func restorePetsToVisibleScreens() {
+        targets.removeAll()
+        activeInteraction = nil
+
+        for id in PetID.allCases {
+            updatePet(id) { pet in
+                let frame = visibleFrameProvider(pet.position).insetBy(dx: 90, dy: 95)
+                guard frame.width > 0, frame.height > 0 else { return }
+                pet.position = CGPoint(
+                    x: min(max(pet.position.x, frame.minX), frame.maxX),
+                    y: min(max(pet.position.y, frame.minY), frame.maxY)
+                )
+                pet.activity = .idle
+                pet.emotion = .content
+            }
+        }
+        publish()
     }
 
     func togglePartnerAppearance() {
@@ -147,7 +226,7 @@ final class PetWorld {
     }
 
     private func scheduleWalk(for id: PetID) {
-        guard var pet = pets[id], pet.activity == .idle else { return }
+        guard let pet = pets[id], pet.activity == .idle else { return }
         let frame = visibleFrameProvider(pet.position).insetBy(dx: 90, dy: 90)
         guard frame.width > 0, frame.height > 0 else { return }
 
@@ -155,6 +234,11 @@ final class PetWorld {
             x: CGFloat.random(in: frame.minX...frame.maxX),
             y: CGFloat.random(in: frame.minY...(frame.minY + min(120, frame.height)))
         )
+        scheduleWalk(for: id, to: target)
+    }
+
+    private func scheduleWalk(for id: PetID, to target: CGPoint) {
+        guard var pet = pets[id], pet.activity == .idle else { return }
         targets[id] = target
         pet.facing = target.x >= pet.position.x ? .right : .left
         pet.activity = .walking
@@ -162,6 +246,12 @@ final class PetWorld {
         pets[id] = pet
         publish()
         ensureMotionTimer()
+    }
+
+    private func updatePet(_ id: PetID, update: (inout PetRuntimeState) -> Void) {
+        guard var pet = pets[id] else { return }
+        update(&pet)
+        pets[id] = pet
     }
 
     private func ensureMotionTimer() {

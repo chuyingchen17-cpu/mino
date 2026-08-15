@@ -7,6 +7,30 @@ final class EffectWindowController {
 
     func showKissHeart(at position: CGPoint) {
         let size = CGSize(width: 130, height: 120)
+        present(
+            scene: KissEffectScene(size: size),
+            size: size,
+            at: position,
+            title: "Mino Effect: Kiss"
+        )
+    }
+
+    func showFlowerGift(at position: CGPoint) {
+        let size = CGSize(width: 180, height: 145)
+        present(
+            scene: FlowerEffectScene(size: size),
+            size: size,
+            at: position,
+            title: "Mino Effect: Flower"
+        )
+    }
+
+    private func present(
+        scene: TimedEffectScene,
+        size: CGSize,
+        at position: CGPoint,
+        title: String
+    ) {
         let panel = NSPanel(
             contentRect: CGRect(
                 x: position.x - size.width / 2,
@@ -22,7 +46,6 @@ final class EffectWindowController {
         view.allowsTransparency = true
         view.preferredFramesPerSecond = 30
 
-        let scene = KissEffectScene(size: size)
         scene.onFinished = { [weak self, weak panel] in
             guard let self, let panel else { return }
             panel.orderOut(nil)
@@ -30,7 +53,7 @@ final class EffectWindowController {
         }
         view.presentScene(scene)
 
-        panel.title = "Mino Effect: Kiss"
+        panel.title = title
         panel.setAccessibilityLabel(panel.title)
         panel.contentView = view
         panel.isOpaque = false
@@ -52,7 +75,7 @@ final class EffectWindowController {
 }
 
 @MainActor
-private final class KissEffectScene: SKScene {
+private class TimedEffectScene: SKScene {
     var onFinished: (() -> Void)?
 
     override init(size: CGSize) {
@@ -64,6 +87,10 @@ private final class KissEffectScene: SKScene {
     required init?(coder aDecoder: NSCoder) {
         nil
     }
+}
+
+@MainActor
+private final class KissEffectScene: TimedEffectScene {
 
     override func didMove(to view: SKView) {
         let label = SKLabelNode(text: "啵~")
@@ -131,3 +158,94 @@ private final class KissEffectScene: SKScene {
     }
 }
 
+@MainActor
+private final class FlowerEffectScene: TimedEffectScene {
+    override func didMove(to view: SKView) {
+        let label = SKLabelNode(text: "送你一朵花")
+        label.fontName = "PingFangSC-Semibold"
+        label.fontSize = 17
+        label.fontColor = .systemPink
+        label.position = CGPoint(x: size.width / 2, y: 19)
+        addChild(label)
+
+        let flower = SKNode()
+        flower.position = CGPoint(x: size.width / 2, y: 72)
+        flower.setScale(0.15)
+        flower.alpha = 0
+        addChild(flower)
+
+        let stemPath = CGMutablePath()
+        stemPath.move(to: CGPoint(x: 0, y: -34))
+        stemPath.addCurve(
+            to: CGPoint(x: 0, y: -2),
+            control1: CGPoint(x: -7, y: -22),
+            control2: CGPoint(x: 5, y: -13)
+        )
+        let stem = SKShapeNode(path: stemPath)
+        stem.strokeColor = .systemGreen
+        stem.lineWidth = 4
+        stem.lineCap = .round
+        flower.addChild(stem)
+
+        for angle in stride(from: 0.0, to: Double.pi * 2, by: Double.pi / 3) {
+            let petal = SKShapeNode(ellipseOf: CGSize(width: 21, height: 30))
+            petal.fillColor = .systemPink
+            petal.strokeColor = .white
+            petal.lineWidth = 1.5
+            petal.position = CGPoint(x: cos(angle) * 13, y: 9 + sin(angle) * 13)
+            petal.zRotation = CGFloat(angle) - .pi / 2
+            flower.addChild(petal)
+        }
+
+        let center = SKShapeNode(circleOfRadius: 9)
+        center.fillColor = .systemYellow
+        center.strokeColor = .white
+        center.lineWidth = 1.5
+        center.position = CGPoint(x: 0, y: 9)
+        center.zPosition = 2
+        flower.addChild(center)
+
+        let appear = SKAction.group([
+            .fadeIn(withDuration: 0.15),
+            .scale(to: 1, duration: 0.32),
+            .rotate(byAngle: 0.16, duration: 0.32)
+        ])
+        appear.timingMode = .easeOut
+        flower.run(.sequence([
+            appear,
+            .wait(forDuration: 1.05),
+            .group([
+                .moveBy(x: 0, y: 17, duration: 0.55),
+                .fadeOut(withDuration: 0.55)
+            ])
+        ]))
+
+        for index in 0..<4 {
+            let sparkle = SKShapeNode(circleOfRadius: 3)
+            sparkle.fillColor = index.isMultiple(of: 2) ? .systemYellow : .systemPink
+            sparkle.strokeColor = .clear
+            sparkle.position = CGPoint(
+                x: size.width / 2 + (index.isMultiple(of: 2) ? -1 : 1) * CGFloat(36 + index * 4),
+                y: 75 + CGFloat(index % 2) * 22
+            )
+            sparkle.alpha = 0
+            addChild(sparkle)
+            sparkle.run(.sequence([
+                .wait(forDuration: 0.25 + Double(index) * 0.1),
+                .fadeIn(withDuration: 0.12),
+                .scale(to: 1.8, duration: 0.22),
+                .fadeOut(withDuration: 0.35)
+            ]))
+        }
+
+        label.run(.sequence([
+            .fadeIn(withDuration: 0.18),
+            .wait(forDuration: 1.25),
+            .fadeOut(withDuration: 0.35)
+        ]))
+        run(.sequence([
+            .wait(forDuration: 2),
+            .run { [weak self] in self?.onFinished?() }
+        ]))
+    }
+}

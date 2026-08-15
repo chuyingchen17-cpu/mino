@@ -83,3 +83,47 @@ func kissInteractionApproachesThenEmitsEffectAndCompletes() {
     #expect(mine.emotion == .content)
     #expect(partner.emotion == .content)
 }
+
+@Test
+func flowerInteractionHasDistinctOfferPoseAndCompletionEmotion() {
+    var mine = PetRuntimeState(
+        id: .mine,
+        displayName: "奶糖",
+        position: CGPoint(x: 100, y: 100),
+        facing: .left,
+        activity: .idle,
+        emotion: .content,
+        avatar: .mine
+    )
+    var partner = PetRuntimeState(
+        id: .partner,
+        displayName: "团子",
+        position: CGPoint(x: 500, y: 100),
+        facing: .right,
+        activity: .idle,
+        emotion: .content,
+        avatar: .partner
+    )
+    var interaction = FlowerInteractionSession(
+        mine: mine,
+        partner: partner,
+        visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 600)
+    )
+
+    var cue: InteractionCue?
+    for _ in 0..<200 where cue == nil {
+        cue = interaction.advance(mine: &mine, partner: &partner, deltaTime: 1.0 / 30.0).cue
+    }
+
+    guard case .flowerGift = cue else {
+        Issue.record("Expected the flower gift cue")
+        return
+    }
+    #expect(mine.emotion == .happy)
+    #expect(partner.emotion == .shy)
+
+    let completion = interaction.advance(mine: &mine, partner: &partner, deltaTime: 3)
+    #expect(completion.completed)
+    #expect(mine.emotion == .content)
+    #expect(partner.emotion == .happy)
+}
