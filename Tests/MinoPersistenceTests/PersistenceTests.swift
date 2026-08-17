@@ -5,6 +5,46 @@ import Testing
 @testable import MinoPersistence
 
 @Test
+func livePathsIsolateDebugClientProfiles() throws {
+    let applicationSupport = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: applicationSupport) }
+
+    let alice = try AppStoragePaths.live(
+        storageNamespace: "alice",
+        applicationSupportDirectory: applicationSupport
+    )
+    let bob = try AppStoragePaths.live(
+        storageNamespace: "bob",
+        applicationSupportDirectory: applicationSupport
+    )
+    let standard = try AppStoragePaths.live(
+        applicationSupportDirectory: applicationSupport
+    )
+
+    let minoRoot = applicationSupport.appendingPathComponent("Mino", isDirectory: true)
+    #expect(alice.rootDirectory == minoRoot.appendingPathComponent("alice", isDirectory: true))
+    #expect(bob.rootDirectory == minoRoot.appendingPathComponent("bob", isDirectory: true))
+    #expect(standard.rootDirectory == minoRoot)
+    #expect(alice.coupleSnapshotFile != bob.coupleSnapshotFile)
+
+    let attributes = try FileManager.default.attributesOfItem(atPath: alice.rootDirectory.path)
+    #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o700)
+}
+
+@Test
+func livePathsRejectUnsafeStorageNamespace() throws {
+    let applicationSupport = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: applicationSupport) }
+
+    #expect(throws: PersistenceError.invalidStorageNamespace("../bob")) {
+        try AppStoragePaths.live(
+            storageNamespace: "../bob",
+            applicationSupportDirectory: applicationSupport
+        )
+    }
+}
+
+@Test
 func coupleSnapshotPersistsAcrossStoreInstances() async throws {
     let temporaryDirectory = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
@@ -84,6 +124,59 @@ func unsupportedPersistenceSchemaFailsWithoutDeletingData() async throws {
         #expect(error == .unsupportedSchema(expected: 1, actual: 99))
     }
     #expect(FileManager.default.fileExists(atPath: paths.interactionOutboxFile.path))
+}
+
+@Test
+func timelinePersistsOrdersAndDeduplicatesEvents() async throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let paths = AppStoragePaths(rootDirectory: temporaryDirectory)
+    let later = PersonalTimelineEvent(
+        id: "event_2",
+        kind: .visitArrived,
+        occurredAt: Date(timeIntervalSince1970: 2_000)
+    )
+    let earlier = PersonalTimelineEvent(
+        id: "event_1",
+        kind: .visitInvited,
+        occurredAt: Date(timeIntervalSince1970: 1_000)
+    )
+
+    let writer = FilePersonalTimelineStore(paths: paths)
+    try await writer.merge([later, earlier, later])
+
+    let reader = FilePersonalTimelineStore(paths: paths)
+    let events = try await reader.load()
+    #expect(events.map(\.id) == ["event_1", "event_2"])
+    let attributes = try FileManager.default.attributesOfItem(atPath: paths.personalTimelineFile.path)
+    #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+}
+
+@Test
+func personalTimelineMigratesLegacyFileWithoutDeletingIt() async throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let paths = AppStoragePaths(rootDirectory: temporaryDirectory)
+    let event = PersonalTimelineEvent(
+        id: "event_legacy",
+        kind: .visitArrived,
+        occurredAt: Date(timeIntervalSince1970: 1_000)
+    )
+    let legacyFile = AtomicJSONFile<[PersonalTimelineEvent]>(
+        url: paths.legacyCoupleTimelineFile,
+        schemaVersion: 1
+    )
+    try legacyFile.save([event])
+
+    let store = FilePersonalTimelineStore(paths: paths)
+    #expect(try await store.load() == [event])
+    #expect(FileManager.default.fileExists(atPath: paths.personalTimelineFile.path))
+    #expect(FileManager.default.fileExists(atPath: paths.legacyCoupleTimelineFile.path))
+
+    try await store.clear()
+    let reopened = FilePersonalTimelineStore(paths: paths)
+    #expect(try await reopened.load().isEmpty)
+    #expect(FileManager.default.fileExists(atPath: paths.legacyCoupleTimelineFile.path))
 }
 
 private func makeTemporaryDirectory() throws -> URL {

@@ -10,12 +10,63 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: mino
+          POSTGRES_USER: mino
+          POSTGRES_PASSWORD: mino_dev_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mino -d mino"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Backend/package-lock.json
+      - name: Install backend dependencies
+        run: npm ci
+        working-directory: Backend
+      - name: Typecheck and test backend
+        run: |
+          npm run typecheck
+          npm test
+          npm run build
+        working-directory: Backend
+      - name: Apply PostgreSQL migration
+        run: npm run db:migrate
+        working-directory: Backend
+        env:
+          DATABASE_URL: postgres://mino:mino_dev_only@127.0.0.1:5432/mino
+      - name: Test PostgreSQL store and restart recovery
+        run: npm test -- tests/postgres.integration.test.ts
+        working-directory: Backend
+        env:
+          DATABASE_URL: postgres://mino:mino_dev_only@127.0.0.1:5432/mino
+          RUN_POSTGRES_TESTS: "true"
+
   build-and-test:
     runs-on: macos-latest
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Backend/package-lock.json
       - name: Show toolchain
         run: swift --version
       - name: Run tests
@@ -23,4 +74,6 @@ jobs:
       - name: Build release app bundle
         run: MINO_BUILD_CONFIGURATION=release Scripts/build-app.sh
       - name: Validate bundle metadata
-        run: plutil -lint .build/Mino.app/Contents/Info.plist
+        run: |
+          plutil -lint .build/Mino.app/Contents/Info.plist
+          codesign --verify --deep --strict .build/Mino.app

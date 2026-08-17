@@ -5,6 +5,25 @@ import Testing
 @testable import MinoSecurity
 
 @Test
+func keychainNamespacesIsolateDebugClientProfilesAndPreserveLegacyDefault() throws {
+    let standard = try KeychainSessionCredentialStore.serviceName(for: "")
+    let alice = try KeychainSessionCredentialStore.serviceName(for: "alice")
+    let bob = try KeychainSessionCredentialStore.serviceName(for: "bob")
+
+    #expect(standard == "com.mino.app.session")
+    #expect(alice == "com.mino.app.session.profile.alice")
+    #expect(bob == "com.mino.app.session.profile.bob")
+    #expect(alice != bob)
+}
+
+@Test
+func keychainNamespaceRejectsUnsafeValues() {
+    #expect(throws: KeychainCredentialStoreError.invalidNamespace("../alice")) {
+        try KeychainSessionCredentialStore.serviceName(for: "../alice")
+    }
+}
+
+@Test
 func credentialRefreshUsesSafetyLeeway() {
     let now = Date(timeIntervalSince1970: 1_000)
     let credential = SessionCredential(

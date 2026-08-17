@@ -1,8 +1,9 @@
 import Foundation
 
-public enum CoupleInteractionKind: String, Codable, CaseIterable, Sendable {
+public enum PetInteractionKind: String, Codable, CaseIterable, Sendable {
     case kiss
     case flowerGift = "flower_gift"
+    case walk
 }
 
 public struct PetProfileID: RawRepresentable, Codable, Hashable, Sendable {
@@ -25,14 +26,14 @@ public struct PetProfileID: RawRepresentable, Codable, Hashable, Sendable {
 
 public struct InteractionCommand: Codable, Equatable, Sendable {
     public let idempotencyKey: UUID
-    public let kind: CoupleInteractionKind
+    public let kind: PetInteractionKind
     public let senderPetID: PetProfileID
     public let recipientPetID: PetProfileID
     public let clientCreatedAt: Date
 
     public init(
         idempotencyKey: UUID = UUID(),
-        kind: CoupleInteractionKind,
+        kind: PetInteractionKind,
         senderPetID: PetProfileID,
         recipientPetID: PetProfileID,
         clientCreatedAt: Date = Date()
@@ -78,4 +79,123 @@ public enum BackendServiceError: Error, Equatable, Sendable {
 public protocol BackendService: Sendable {
     func checkHealth() async throws -> BackendHealth
     func sendInteraction(_ command: InteractionCommand) async throws -> InteractionReceipt
+    func fetchPetPresence() async throws -> PetPresenceSnapshot
+    func startPetVisit(_ command: StartPetVisitCommand) async throws -> PetVisitReceipt
+    func returnPetVisit(_ command: ReturnPetVisitCommand) async throws -> PetVisitReceipt
+    func sendPetVisitInvitation(
+        _ command: SendPetVisitInvitationCommand
+    ) async throws -> PetVisitInvitation
+    func fetchPendingPetVisitInvitations() async throws -> [PetVisitInvitation]
+    func respondToPetVisitInvitation(
+        _ command: RespondToPetVisitInvitationCommand
+    ) async throws -> PetVisitInvitationReceipt
+    func fetchPersonalTimeline(after cursor: String?) async throws -> PersonalTimelinePage
 }
+
+public extension BackendService {
+    @available(*, deprecated, renamed: "fetchPersonalTimeline(after:)")
+    func fetchCoupleTimeline(after cursor: String?) async throws -> PersonalTimelinePage {
+        try await fetchPersonalTimeline(after: cursor)
+    }
+}
+
+@available(*, deprecated, renamed: "PetInteractionKind")
+public typealias CoupleInteractionKind = PetInteractionKind
+
+/// Network capabilities used by the two-client social MVP.
+///
+/// Kept separate from `BackendService` so the existing offline demo and its
+/// lightweight test doubles remain source-compatible while the MVP rolls out.
+public protocol MVPBackendService: BackendService {
+    func bootstrapDevelopmentProfile(_ profile: String) async throws -> DevBootstrapProfile
+
+    func fetchFriends() async throws -> [FriendProfile]
+    func fetchFriendRequests(status: FriendRequestStatus?) async throws -> [FriendRequest]
+    func createFriendRequest(_ command: CreateFriendRequestCommand) async throws -> FriendRequest
+    func respondToFriendRequest(
+        requestID: FriendRequestID,
+        command: RespondFriendRequestCommand
+    ) async throws -> FriendRequest
+
+    func fetchEvents(
+        friendshipID: FriendshipID,
+        after eventID: String?
+    ) async throws -> FriendshipEventPage
+    func fetchTimelineEvents(
+        friendshipID: FriendshipID,
+        after eventID: String?
+    ) async throws -> FriendshipEventPage
+
+    func createConversation(
+        friendshipID: FriendshipID,
+        _ command: CreateConversationCommand
+    ) async throws -> ConversationTurnReceipt
+    func fetchConversations(
+        friendshipID: FriendshipID,
+        status: ConversationStatus?
+    ) async throws -> [PetConversation]
+    func fetchConversationMessages(
+        friendshipID: FriendshipID,
+        conversationID: ConversationID
+    ) async throws -> [PetConversationMessage]
+    func sendConversationMessage(
+        friendshipID: FriendshipID,
+        conversationID: ConversationID,
+        command: SendConversationMessageCommand
+    ) async throws -> ConversationTurnReceipt
+    func endConversation(
+        friendshipID: FriendshipID,
+        conversationID: ConversationID,
+        command: EndConversationCommand
+    ) async throws -> PetConversation
+
+    func createVisitInvitation(
+        friendshipID: FriendshipID,
+        _ command: CreateVisitInvitationCommand
+    ) async throws -> MVPVisit
+    func fetchVisitInvitations(
+        friendshipID: FriendshipID,
+        status: MVPVisitStatus?
+    ) async throws -> [MVPVisit]
+    func respondToVisitInvitation(
+        friendshipID: FriendshipID,
+        visitID: PetVisitID,
+        command: RespondToVisitInvitationCommand
+    ) async throws -> MVPVisit
+    func sendVisitInteraction(
+        friendshipID: FriendshipID,
+        visitID: PetVisitID,
+        command: CreateVisitInteractionCommand
+    ) async throws -> VisitInteractionReceipt
+    func sendVisitReaction(
+        friendshipID: FriendshipID,
+        visitID: PetVisitID,
+        command: CreateVisitReactionCommand
+    ) async throws -> VisitReactionReceipt
+    func createLetter(
+        friendshipID: FriendshipID,
+        visitID: PetVisitID,
+        command: CreateLetterCommand
+    ) async throws -> PetLetter
+    func fetchLetter(
+        friendshipID: FriendshipID,
+        _ letterID: LetterID
+    ) async throws -> PetLetter
+    func endVisit(
+        friendshipID: FriendshipID,
+        visitID: PetVisitID,
+        command: EndVisitCommand
+    ) async throws -> EndVisitReceipt
+}
+
+/// Realtime delivery is deliberately independent from REST lifecycle. Consumers
+/// always retain `/events?after=` as the recovery source of truth.
+public protocol FriendshipEventRealtimeService: Sendable {
+    func events(
+        friendshipID: FriendshipID,
+        after eventID: String?
+    ) async throws -> AsyncThrowingStream<FriendshipEvent, Error>
+}
+
+@available(*, deprecated, renamed: "FriendshipEventRealtimeService")
+public typealias CoupleEventRealtimeService = FriendshipEventRealtimeService

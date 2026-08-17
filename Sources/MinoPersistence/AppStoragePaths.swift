@@ -15,14 +15,44 @@ public struct AppStoragePaths: Equatable, Sendable {
         rootDirectory.appendingPathComponent("interaction-outbox.json", isDirectory: false)
     }
 
-    public static func live(fileManager: FileManager = .default) throws -> AppStoragePaths {
-        let applicationSupport = try fileManager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let root = applicationSupport.appendingPathComponent("Mino", isDirectory: true)
+    public var personalTimelineFile: URL {
+        rootDirectory.appendingPathComponent("personal-timeline.json", isDirectory: false)
+    }
+
+    public var legacyCoupleTimelineFile: URL {
+        rootDirectory.appendingPathComponent("couple-timeline.json", isDirectory: false)
+    }
+
+    @available(*, deprecated, renamed: "personalTimelineFile")
+    public var coupleTimelineFile: URL {
+        personalTimelineFile
+    }
+
+    public static func live(
+        storageNamespace: String = "",
+        fileManager: FileManager = .default,
+        applicationSupportDirectory: URL? = nil
+    ) throws -> AppStoragePaths {
+        guard isValidNamespace(storageNamespace) else {
+            throw PersistenceError.invalidStorageNamespace(storageNamespace)
+        }
+
+        let applicationSupport: URL
+        if let applicationSupportDirectory {
+            applicationSupport = applicationSupportDirectory
+        } else {
+            applicationSupport = try fileManager.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+        }
+
+        var root = applicationSupport.appendingPathComponent("Mino", isDirectory: true)
+        if !storageNamespace.isEmpty {
+            root.appendPathComponent(storageNamespace, isDirectory: true)
+        }
         try fileManager.createDirectory(
             at: root,
             withIntermediateDirectories: true,
@@ -34,9 +64,22 @@ public struct AppStoragePaths: Equatable, Sendable {
         )
         return AppStoragePaths(rootDirectory: root)
     }
+
+    private static func isValidNamespace(_ value: String) -> Bool {
+        guard value.count <= 64 else { return false }
+        return value.unicodeScalars.allSatisfy { scalar in
+            switch scalar.value {
+            case 48...57, 65...90, 97...122, 45, 95:
+                true
+            default:
+                false
+            }
+        }
+    }
 }
 
 public enum PersistenceError: Error, Equatable, Sendable {
+    case invalidStorageNamespace(String)
     case unsupportedSchema(expected: Int, actual: Int)
     case encoding
     case decoding

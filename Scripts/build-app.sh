@@ -61,8 +61,17 @@ env CLANG_MODULE_CACHE_PATH="$cache_dir/clang" swift build \
     --security-path "$cache_dir/security"
 
 rm -rf "$staging_dir"
-mkdir -p "$staging_dir/Contents/MacOS"
+mkdir -p "$staging_dir/Contents/MacOS" "$staging_dir/Contents/Resources"
 install -m 755 "$build_dir/$configuration/Mino" "$staging_dir/Contents/MacOS/Mino"
+install -m 644 \
+    "$project_dir/Sources/MinoPresentation/Resources/shared-room.png" \
+    "$staging_dir/Contents/Resources/shared-room.png"
+install -m 644 \
+    "$project_dir/Sources/MinoPresentation/Resources/shared-room-away.png" \
+    "$staging_dir/Contents/Resources/shared-room-away.png"
+install -m 644 \
+    "$project_dir/Sources/MinoPresentation/Resources/partner-avatar.png" \
+    "$staging_dir/Contents/Resources/partner-avatar.png"
 cp "$project_dir/Support/Info.plist" "$staging_dir/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$marketing_version" "$staging_dir/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$build_number" "$staging_dir/Contents/Info.plist"
@@ -78,8 +87,12 @@ if [[ -n "${MINO_CODE_SIGN_IDENTITY:-}" ]]; then
         --entitlements "$project_dir/Support/Mino.entitlements" \
         --sign "$MINO_CODE_SIGN_IDENTITY" \
         "$staging_dir"
-    codesign --verify --deep --strict "$staging_dir"
+else
+    # SwiftPM only linker-signs the executable. Sign the assembled bundle so
+    # macOS binds Info.plist and resources to the application identity too.
+    codesign --force --sign - "$staging_dir"
 fi
+codesign --verify --deep --strict "$staging_dir"
 
 rm -rf "$bundle_dir"
 mv "$staging_dir" "$bundle_dir"

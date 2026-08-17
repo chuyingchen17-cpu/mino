@@ -1,39 +1,44 @@
-# 后端接入约定
+# MVP 后端契约
 
-机器可读契约位于 [`Backend/openapi.yaml`](../Backend/openapi.yaml)。当前契约只覆盖连通性和互动投递，用于稳定客户端边界，不代表账号、配对和同步模型已经定稿。
+机器可读契约以 [`Backend/openapi.yaml`](../Backend/openapi.yaml) 为准。基础路径为 `{baseURL}/v1`，成功信封是 `{"data": ...}`，错误信封是 `{"error":{"code":"...","message":"..."}}`。除健康检查和启用后的开发 bootstrap 外，所有路由都要求 `Authorization: Bearer <token>`。
 
-## 配置
+## 核心接口
 
-| Info.plist | 环境变量 | 默认值 | 说明 |
-|---|---|---:|---|
-| `MinoBackendMode` | `MINO_BACKEND_MODE` | `offline` | `offline` 或 `remote` |
-| `MinoAPIBaseURL` | `MINO_API_BASE_URL` | 空 | 远端模式必填 |
-| `MinoAPIVersion` | `MINO_API_VERSION` | `v1` | URL 版本段 |
-| `MinoRequestTimeout` | `MINO_REQUEST_TIMEOUT` | `10` | 1–60 秒 |
+| 能力 | 接口 |
+|---|---|
+| 健康与开发身份 | `GET /health`, `POST /dev/bootstrap` |
+| 当前身份与好友 | `GET /me`, `GET/POST /friendships`, `POST /friendships/{id}/respond` |
+| 事件恢复与时间线 | `GET /events?friendshipID=&after=`, `GET /timeline?friendshipID=&after=`, `GET /ws?friendshipID=` |
+| 托管模型代理 | `POST /agent/decision` |
+| 自主对话 | `GET/POST /conversations`, `GET/POST /conversations/{id}/messages`, `POST /conversations/{id}/end` |
+| 串门邀请 | `GET/POST /visit-invitations`, `POST /visit-invitations/{id}/respond` |
+| 来访互动与反应 | `POST /visits/{id}/interactions`, `POST /visits/{id}/reactions` |
+| 信件 | `POST /visits/{id}/letter`, `GET /letters/{letterID}` |
+| 回家 | `POST /visits/{id}/end` |
 
-环境变量优先于 Info.plist。非本地服务必须使用 HTTPS；HTTP 只允许 `localhost`、`127.0.0.1` 和 `::1`。
+旧版 presence/interaction 路由保留为迁移兼容入口，新 MVP 以 durable events 与 `MVPVisit` 为准。旧 `POST /pet-visits` 无法表达对方同意，现已在写入前返回 `409 visit_invitation_required`；它不会遗留 pending 串门，调用方必须改用邀请握手。
 
-## 协议
+## 隔离与授权
 
-- 基础路径：`{baseURL}/{apiVersion}`
-- 健康检查：`GET /health`
-- 发送互动：`POST /interactions`
-- 成功响应：`{"data": ...}`
-- 失败响应：`{"error":{"code":"...","message":"..."}}`
-- 认证：`Authorization: Bearer <token>`
-- 客户端标识：`X-Mino-Client: macos`
-- JSON 日期：ISO 8601
+Bearer token 只确定当前个人账号，不能隐式确定某一位好友。所有跨账号路由必须携带 `friendshipID`，服务端同时校验该关系已接受、当前账号是成员、目标账号/宠物属于该关系，以及资源的内部 scope 与该关系一致。不存在、跨好友关系和无权访问的私密资源统一返回不可枚举的 404。为迁移兼容，账号恰好只有一个已接受好友时可以暂时省略 `friendshipID`；拥有零个或多个好友时返回 `409 friendship_context_required`。
 
-每次互动都携带 UUID `idempotencyKey`，同时写入 `Idempotency-Key` 请求头。服务端必须在情侣关系范围内去重，重复请求返回第一次的 receipt，而不是再次触发互动。
+串门响应者由方向决定：`requestedByAccountID` 若是访客主人，则 host 响应；若是 host，则访客主人响应。事件同时携带 `requestedByAccountID` 与 `responderAccountID` 供客户端确定由哪只本地宠物处理。
 
-## 身份与安全
+## 幂等与恢复
 
-- `PetProfileID` 是服务端档案 ID；本地 `.mine/.partner` 只是界面角色，禁止作为远端主键。
-- Token 不允许出现在 Info.plist、环境配置文件、URL、分析事件或日志中。
-- 客户端已通过 Keychain 会话仓库为 `AccessTokenProvider` 提供未过期的访问令牌；刷新流程尚未接入。
-- 客户端不能信任本地 sender，服务端必须从登录会话和情侣关系重新授权。
-- 错误日志只记录稳定错误码和请求 ID，不记录响应正文中的私人内容。
+所有 mutation 携带 UUID `idempotencyKey`，客户端也写 `Idempotency-Key` header。服务端在账号/好友关系和 operation scope 内保存 canonical request fingerprint 与首次回执：
 
-## 暂不定义
+- 相同 key + 相同 payload：返回首次结果，不重复事件或计费。
+- 相同 key + 不同 payload：`409 idempotency_key_reused`。
 
-账号注册、邀请配对、宠物档案同步、素材清单、实时事件游标和冲突解决仍处于产品探索阶段。客户端已有强类型身份和情侣快照模型，但这些端点应该在交互流程明确后分别扩充协议，避免现在形成错误的通用 `/sync` 接口。
+事件 ID 是严格 UUID。每个好友关系有独立 cursor；空页保持请求 cursor，格式错误 cursor 返回 400，未知或跨关系 cursor 返回 404。WebSocket 不承担持久化，断线后一律先 REST catch-up。个人事件线由客户端合并所有好友关系中 `timelineVisible` 的事件，好友申请单独从 `/friendships?status=pending` 获取。
+
+## 模型边界
+
+客户端只提交裁剪后的触发事件、白名单逻辑状态、相关记忆摘要和可用动作。服务端拒绝未知状态字段、伪造的好友/目标宠物身份以及任何信件类上下文，再校验结构化 `PetDecision`；不保存 prompt、原始 provider response 或完整本地记忆，只按账号和 `inferenceID` 保存已验证决定、memory disposition 和 token usage 以支持重放。
+
+非法输出、超时或网络失败不会改变 visit/presence，客户端进入安全 idle。密封文字信正文禁止进入 Agent 请求。
+
+## 信件
+
+`letter_attached` 与 `letter_received` 事件只含 ID 和路由元数据。PostgreSQL 与幂等回执中的正文均为 AES-256-GCM 密文；API 只在授权时解密。作者可读取自己的信，收件人仅在 `delivered` 后可读取。MVP 使用 HTTPS/WSS 和服务端加密，不宣称 E2EE。

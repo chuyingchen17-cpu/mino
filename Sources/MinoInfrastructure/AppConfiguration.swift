@@ -5,6 +5,73 @@ public enum BackendMode: String, Codable, Sendable {
     case remote
 }
 
+/// A coarse desktop region used to keep two local development clients visually separate.
+/// Screen coordinates and animation remain owned by the presentation/runtime layers.
+public enum ScreenRegion: String, Codable, Equatable, Sendable {
+    case full
+    case leftHalf
+    case rightHalf
+}
+
+/// Runtime metadata for an isolated client instance.
+///
+/// `alice` and `bob` are development-only identities selected with
+/// `MINO_CLIENT_PROFILE`. The default profile keeps the legacy storage and
+/// Keychain locations so existing users are not migrated unexpectedly.
+public struct ClientRuntimeProfile: Codable, Equatable, Sendable {
+    public let id: String
+    public let storageNamespace: String
+    public let keychainNamespace: String
+    public let screenRegion: ScreenRegion
+    public let debugDisplayName: String
+
+    public init(
+        id: String,
+        storageNamespace: String,
+        keychainNamespace: String,
+        screenRegion: ScreenRegion,
+        debugDisplayName: String
+    ) {
+        self.id = id
+        self.storageNamespace = storageNamespace
+        self.keychainNamespace = keychainNamespace
+        self.screenRegion = screenRegion
+        self.debugDisplayName = debugDisplayName
+    }
+
+    public static let standard = ClientRuntimeProfile(
+        id: "default",
+        storageNamespace: "",
+        keychainNamespace: "",
+        screenRegion: .full,
+        debugDisplayName: "Mino"
+    )
+
+    public static let alice = ClientRuntimeProfile(
+        id: "alice",
+        storageNamespace: "alice",
+        keychainNamespace: "alice",
+        screenRegion: .leftHalf,
+        debugDisplayName: "Alice / 奶糖"
+    )
+
+    public static let bob = ClientRuntimeProfile(
+        id: "bob",
+        storageNamespace: "bob",
+        keychainNamespace: "bob",
+        screenRegion: .rightHalf,
+        debugDisplayName: "Bob / 团子"
+    )
+
+    fileprivate static func named(_ value: String) -> ClientRuntimeProfile? {
+        switch value.lowercased() {
+        case "alice": .alice
+        case "bob": .bob
+        default: nil
+        }
+    }
+}
+
 public struct BackendConfiguration: Equatable, Sendable {
     public let mode: BackendMode
     public let baseURL: URL?
@@ -31,9 +98,14 @@ public struct BackendConfiguration: Equatable, Sendable {
 
 public struct AppConfiguration: Equatable, Sendable {
     public let backend: BackendConfiguration
+    public let clientProfile: ClientRuntimeProfile
 
-    public init(backend: BackendConfiguration) {
+    public init(
+        backend: BackendConfiguration,
+        clientProfile: ClientRuntimeProfile = .standard
+    ) {
         self.backend = backend
+        self.clientProfile = clientProfile
     }
 
     public static let offline = AppConfiguration(backend: .offline)
@@ -41,6 +113,7 @@ public struct AppConfiguration: Equatable, Sendable {
 
 public enum ConfigurationError: Error, Equatable, Sendable {
     case unknownBackendMode(String)
+    case unknownClientProfile(String)
     case missingBackendBaseURL
     case invalidBackendBaseURL(String)
     case insecureBackendBaseURL(String)
@@ -63,6 +136,22 @@ public enum AppConfigurationLoader {
         info: [String: Any],
         environment: [String: String]
     ) throws -> AppConfiguration {
+        let clientProfile: ClientRuntimeProfile
+        if let rawProfile = value(
+            environmentKey: "MINO_CLIENT_PROFILE",
+            infoKey: "MinoClientProfile",
+            info: info,
+            environment: environment
+        ) {
+            let profileName = rawProfile.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let selectedProfile = ClientRuntimeProfile.named(profileName) else {
+                throw ConfigurationError.unknownClientProfile(rawProfile)
+            }
+            clientProfile = selectedProfile
+        } else {
+            clientProfile = .standard
+        }
+
         let modeValue = value(
             environmentKey: "MINO_BACKEND_MODE",
             infoKey: "MinoBackendMode",
@@ -101,7 +190,8 @@ public enum AppConfigurationLoader {
                     baseURL: nil,
                     apiVersion: apiVersion,
                     requestTimeout: timeout
-                )
+                ),
+                clientProfile: clientProfile
             )
         }
 
@@ -126,7 +216,8 @@ public enum AppConfigurationLoader {
                 baseURL: baseURL,
                 apiVersion: apiVersion,
                 requestTimeout: timeout
-            )
+            ),
+            clientProfile: clientProfile
         )
     }
 

@@ -34,5 +34,7 @@
 	<string>v1</string>
 	<key>MinoRequestTimeout</key>
 	<integer>10</integer>
+	<key>MinoClientProfile</key>
+	<string></string>
 </dict>
 </plist>

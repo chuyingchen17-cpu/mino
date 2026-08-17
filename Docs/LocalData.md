@@ -1,50 +1,40 @@
 # 本地数据与会话
 
-## 数据分类
+## Profile 隔离
 
-Mino 将敏感凭证和普通应用数据分开保存：
-
-- Keychain：访问令牌、刷新令牌、账号 ID、过期时间。
-- Application Support：情侣快照和待投递互动，不包含 token。
-- OSLog：只记录状态、计数和稳定错误码，不记录 token、请求正文或私人内容。
-
-签名并启用 App Sandbox 后，Application Support 会自动位于应用容器中。当前文件名为：
+Debug 双客户端通过 `MINO_CLIENT_PROFILE=alice|bob` 选择独立命名空间。Alice 与 Bob 的 Application Support、会话 Keychain、Agent 记忆密钥和事件游标互不共享；配置错误回退到离线模式时也保留已识别的 profile，避免两个实例意外合并。
 
 ```text
-Mino/couple-snapshot.json
-Mino/interaction-outbox.json
+Mino/<profile>/couple-snapshot.json
+Mino/<profile>/interaction-outbox.json
+Mino/<profile>/couple-timeline.json
+Mino/<profile>/couple-event-cursor.json
+Mino/<profile>/agent-memory.json.enc
 ```
 
-文件使用原子替换并设置为 `0600`，目录设置为 `0700`。
+默认 profile 保留旧路径兼容。普通 JSON 文件使用原子替换、`0600` 文件权限和版本信封；读取未知 schema 时失败并保留原文件。
 
-## Schema 与迁移
+## Keychain
 
-每个 JSON 文件都使用以下信封：
+Keychain 保存：
 
-```json
-{
-  "schemaVersion": 1,
-  "payload": {}
-}
-```
+- bearer session credential；
+- 每个 profile 独立的 256-bit Agent memory AES key。
 
-本地 payload 中的日期使用 Unix epoch 毫秒，避免互动重试时间在进程重启后丢失亚秒精度；HTTP 契约仍使用 ISO 8601。
+Token 和记忆密钥不写入 Info.plist、普通 JSON 或日志。开发 bootstrap token 仅是本机公开测试凭证，并在服务重启后保持稳定；生产环境禁用该入口。
 
-读取未知版本时必须失败并保留原文件，禁止自动清空。增加字段时优先保持向后兼容；需要破坏性变更时，为旧版本增加显式迁移器并用 fixture 测试。
+## Agent 记忆
 
-Keychain 凭证也有独立 schema version。Token 永远不能迁移到普通 JSON 文件。
+长期记忆容量默认 200 条，使用 CryptoKit AES-GCM 加密文件存储。检索按宠物、类别、相关宠物、时间和有限关键词进行；模型只能收到本轮挑选出的摘要。主人可以查看和删除长期记忆。
 
-## Interaction Outbox
+密封信正文不属于 Agent 记忆，也不会作为观察事件进入上下文。信件正文按需从授权后端接口读取，不落入本地时间线 JSON。
 
-- `idempotencyKey` 同时是本地去重键和 HTTP `Idempotency-Key`。
-- 默认最多保留 500 条，防止离线状态无限占用磁盘。
-- 失败只保存不超过 128 字符的稳定错误码。
-- 重试使用 2 秒起步、最高 5 分钟的指数退避。
-- 条目只有在服务端返回有效 receipt 后才能删除。
-- App 崩溃不会产生“永久 in-flight”状态；下次启动仍可重新投递同一幂等请求。
+## 事件与时间线
 
-当前 Demo 互动没有真实的账号和宠物档案 ID，因此不会写入 Outbox。正式登录与配对完成后，由应用层投递协调器创建 `InteractionCommand`，而不是让 `PetWorld` 直接访问持久化或网络。
+`couple-event-cursor.json` 只在对应事件的 UI 与 Agent 处理成功后推进。客户端重启时先向服务端查询 active/pending visit 恢复可见状态，再从 cursor 补收事件，防止外出宠物在两端同时出现。
 
-## 登出与解除配对
+`couple-timeline.json` 只保存 `timelineVisible` 的真实事件，按 ID 去重并保留发生时间；不推导或显示串门持续时长。信件事件只保存可再次授权获取正文的 `letterID`。
 
-后续登出用例必须按顺序停止同步任务、清除 Keychain 会话、清除情侣快照和 Outbox，最后更新 UI。任一步失败都需要可见错误，不能在凭证仍存在时假装已经退出。
+## Outbox
+
+旧版离线互动 Outbox 继续保留：以 `idempotencyKey` 去重，使用有上限的指数退避，成功 receipt 后删除。MVP 新社交命令由 durable event 协调器和服务端幂等共同保证恢复。

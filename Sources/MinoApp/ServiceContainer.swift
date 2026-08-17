@@ -1,3 +1,4 @@
+import Foundation
 import MinoDomain
 import MinoInfrastructure
 import MinoPersistence
@@ -10,25 +11,49 @@ struct ServiceContainer: Sendable {
     }
 
     let configuration: AppConfiguration
-    let backend: any BackendService
+    let backend: any MVPBackendService
+    let realtimeEvents: (any FriendshipEventRealtimeService)?
     let sessionStore: any SessionCredentialStore
-    let coupleSnapshotStore: any CoupleSnapshotStore
     let interactionOutbox: any InteractionOutboxStore
+    let personalTimelineStore: any PersonalTimelineStore
+    let friendshipEventCursorStore: any FriendshipEventCursorStore
+    let agentMemoryKeyStore: any AgentMemoryKeyStore
+    let agentMemoryFileURL: URL?
     let storageMode: StorageMode
 
     static func live(configuration: AppConfiguration) throws -> ServiceContainer {
-        let paths = try AppStoragePaths.live()
-        let sessionStore = KeychainSessionCredentialStore()
+        let profile = configuration.clientProfile
+        let paths = try AppStoragePaths.live(storageNamespace: profile.storageNamespace)
+        let sessionStore = try KeychainSessionCredentialStore(
+            namespace: profile.keychainNamespace
+        )
         let tokenProvider = StoredAccessTokenProvider(store: sessionStore)
-        return ServiceContainer(
-            configuration: configuration,
-            backend: BackendServiceFactory.make(
+        let backend = BackendServiceFactory.make(
+            configuration: configuration.backend,
+            tokenProvider: tokenProvider
+        )
+        let realtimeEvents: (any FriendshipEventRealtimeService)? =
+            configuration.backend.mode == .remote
+            ? WebSocketFriendshipEventService(
                 configuration: configuration.backend,
                 tokenProvider: tokenProvider
-            ),
+            )
+            : nil
+        return ServiceContainer(
+            configuration: configuration,
+            backend: backend,
+            realtimeEvents: realtimeEvents,
             sessionStore: sessionStore,
-            coupleSnapshotStore: FileCoupleSnapshotStore(paths: paths),
             interactionOutbox: FileInteractionOutboxStore(paths: paths),
+            personalTimelineStore: FilePersonalTimelineStore(paths: paths),
+            friendshipEventCursorStore: FileFriendshipEventCursorStore(paths: paths),
+            agentMemoryKeyStore: try KeychainAgentMemoryKeyStore(
+                namespace: profile.keychainNamespace
+            ),
+            agentMemoryFileURL: paths.rootDirectory.appendingPathComponent(
+                "agent-memory.json.enc",
+                isDirectory: false
+            ),
             storageMode: .persistent
         )
     }
@@ -42,9 +67,13 @@ struct ServiceContainer: Sendable {
                 configuration: configuration.backend,
                 tokenProvider: tokenProvider
             ),
+            realtimeEvents: nil,
             sessionStore: sessionStore,
-            coupleSnapshotStore: InMemoryCoupleSnapshotStore(),
             interactionOutbox: InMemoryInteractionOutboxStore(),
+            personalTimelineStore: InMemoryPersonalTimelineStore(),
+            friendshipEventCursorStore: InMemoryFriendshipEventCursorStore(),
+            agentMemoryKeyStore: InMemoryAgentMemoryKeyStore(),
+            agentMemoryFileURL: nil,
             storageMode: .ephemeral
         )
     }

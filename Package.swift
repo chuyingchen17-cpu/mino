@@ -23,7 +23,10 @@ let package = Package(
         .target(
             name: "MinoPresentation",
             dependencies: ["MinoDomain"],
-            path: "Sources/MinoPresentation"
+            path: "Sources/MinoPresentation",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .target(
             name: "MinoInfrastructure",
@@ -43,6 +46,11 @@ let package = Package(
             dependencies: ["MinoDomain"],
             path: "Sources/MinoPersistence"
         ),
+        .target(
+            name: "MinoAgent",
+            dependencies: ["MinoDomain"],
+            path: "Sources/MinoAgent"
+        ),
         .executableTarget(
             name: "MinoApp",
             dependencies: [
@@ -51,7 +59,8 @@ let package = Package(
                 "MinoPresentation",
                 "MinoInfrastructure",
                 "MinoSecurity",
-                "MinoPersistence"
+                "MinoPersistence",
+                "MinoAgent"
             ],
             path: "Sources/MinoApp"
         ),
@@ -79,6 +88,11 @@ let package = Package(
             name: "MinoPersistenceTests",
             dependencies: ["MinoDomain", "MinoPersistence"],
             path: "Tests/MinoPersistenceTests"
+        ),
+        .testTarget(
+            name: "MinoAgentTests",
+            dependencies: ["MinoDomain", "MinoAgent"],
+            path: "Tests/MinoAgentTests"
         )
     ]
 )

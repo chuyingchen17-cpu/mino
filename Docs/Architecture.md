@@ -1,73 +1,66 @@
-# Mino 工程架构
+# Mino MVP 架构
 
-## 目标
+## 核心边界
 
-当前架构优先保证三件事：桌宠运行时可持续演进、界面实现可替换、后端接入不会渗透到动画和窗口代码。它不是最终的全部生产架构，但已经建立后续功能必须遵守的边界。
-
-## 依赖方向
+每个账号拥有一只个人宠物，每个主客户端运行该宠物的 Agent。Agent 负责自主动作、主人互动、好友宠物对话、串门决定和长期记忆；服务端是有状态的通信媒介与模型代理，但不是宠物大脑。
 
 ```text
-                         ┌──────────────────┐
-                         │     MinoApp      │
-                         │  Composition Root│
-                         └───┬────┬────┬────┘
-                             │    │    │
-                    ┌────────┘    │    └──────────┐
-                    ▼             ▼               ▼
-             MinoRuntime  MinoPresentation  MinoInfrastructure
-                    │             │               │
-                    │       MinoSecurity    MinoPersistence
-                    │             │               │
-                    └─────────────┴───────────────┘
-                                  ▼
-                              MinoDomain
+Alice 客户端 Agent ── REST/WSS ── PostgreSQL + 模型代理 ── REST/WSS ── Bob 客户端 Agent
+       │                                  │                                  │
+  本地加密记忆                    会话/串门/事件/加密信件                  本地加密记忆
+  桌面坐标与动画                  不保存桌面坐标、不代替离线 Agent          桌面坐标与动画
 ```
 
-- `MinoDomain`：稳定的业务语言、值类型和服务协议。不能导入 AppKit、SpriteKit 或 URLSession。
-- `MinoRuntime`：`PetWorld`、移动算法和互动状态机。不能创建窗口或访问网络。
-- `MinoPresentation`：透明窗口、SpriteKit 节点和效果渲染。只消费领域状态，通过回调表达用户意图。
-- `MinoInfrastructure`：环境配置、OSLog、REST 客户端和认证令牌抽象。不能依赖 UI。
-- `MinoSecurity`：Keychain 会话凭证实现；不能把 token 暴露给渲染或运行时。
-- `MinoPersistence`：版本化情侣快照和离线互动队列；不能依赖网络实现。
-- `MinoApp`：唯一的组合根，负责实例化服务、连接状态与渲染、处理应用生命周期。
+后端是单个 Fastify 进程，PostgreSQL 是唯一服务端事实来源。账号可以拥有多个好友关系，所有跨账号操作都必须显式选择已接受的 `friendshipID`。WebSocket 只降低延迟；客户端始终以 `GET /events?friendshipID=<id>&after=<eventID>` 补齐断线和重启期间的事件。MVP 不使用 Redis、消息队列或微服务。
 
-任何新模块都必须保持依赖向下，不允许 `Domain` 反向依赖具体实现。
+## Swift 模块依赖
 
-## 状态与并发
+```text
+MinoApp
+├── MinoAgent ─────────────┐
+├── MinoRuntime            │
+├── MinoPresentation       ├──> MinoDomain
+├── MinoInfrastructure ────┤
+├── MinoPersistence ───────┤
+└── MinoSecurity ──────────┘
+```
 
-- `PetWorld` 是桌宠位置、朝向、活动和情绪的单一事实来源。
-- AppKit、SpriteKit 与 `PetWorld` 都隔离在 `@MainActor`。
-- 网络客户端使用 actor，网络健康检查不阻塞应用启动。
-- 网络响应必须先转换为领域模型，再进入运行时；渲染层不能直接解析 DTO。
-- 互动使用显式阶段状态机，避免依赖散落的延时回调。
+- `MinoDomain`：强类型 ID、命令、访问/对话/信件/事件模型与协议；不导入 UI 或网络实现。
+- `MinoAgent`：串行本地决策队列、上下文裁剪、模型客户端、策略护栏和容量受限的 AES-GCM 记忆。
+- `MinoRuntime`：当前本机可见宠物、坐标、随机移动和显式互动；悬停只暂停环境移动。
+- `MinoPresentation`：桌面窗口、右键菜单、好友页和独立个人事件线。
+- `MinoInfrastructure`：REST 与 WebSocket 实现。DTO 在进入应用协调器前解码为领域模型。
+- `MinoPersistence`：按账号/Profile 隔离的每好友事件游标、个人事件线、快照和 Outbox。
+- `MinoSecurity`：会话 token 与 Agent 记忆密钥的 Keychain 存储。
+- `MinoApp`：`AgentCoordinator`、`ConversationCoordinator`、`VisitCoordinator`、`EventSyncCoordinator` 的唯一组合根。
 
-## 后端边界
+## 事件与幂等
 
-`MinoDomain.BackendService` 是当前唯一后端入口。`MinoInfrastructure` 提供：
+客户端为每个好友关系维护独立事件游标，先处理并持久化事件带来的 UI/Agent 状态，再推进该关系游标。个人事件线把所有好友事件按发生时间合并。若 Agent 决定产生的消息、应答或 reaction 尚未送达，处理器会抛错并保留旧 cursor，八秒补拉会用同一观察 ID 重试。观察 ID 同时作为模型 `inferenceID` 和后续命令的幂等键，因此不会重复计费或重复产生副作用。
 
-- `OfflineBackendService`：默认安全实现，不发出请求。
-- `HTTPBackendService`：版本化 REST 实现。
-- `AccessTokenProvider`：已由 Keychain 会话仓库适配；过期 token 不会被注入请求。
-- `BackendServiceFactory`：根据环境配置创建具体服务。
+服务端在一个数据库事务中写业务状态、好友事件与幂等回执。重复 key 且 payload 相同会重放首次结果；不同 payload 复用同一 key 返回冲突。旧数据库中的 `couple_id`/`couple_events` 仅作为内部迁移兼容 scope，不属于领域协议。
 
-当前本地 Demo 互动不会自动上传。正式同步应在 `MinoApp` 中加入独立的命令协调器，由它决定乐观更新、重试、去重与失败反馈，而不是让 `PetWorld` 依赖网络。
+## 对话
 
-未来实时同步应新增单独的 `RealtimeService` 协议，不要把 WebSocket 生命周期塞进 REST 客户端。
+自主社交开启后不需要主人逐句审批。目标宠物必须属于当前已接受好友关系。服务端校验宠物轮次，一段对话最多六条宠物消息，并保证每个好友关系最多只有一段 active 对话；真人加入时消息明确标记为 `human`。客户端重启时会逐好友恢复 active conversation 和消息上下文。最后一轮到达发起方客户端后，还会从服务端补齐有限 transcript，再由发起方本地 Agent 生成摘要并调用结束接口。事件线只保存摘要，不展示完整逐句记录。
 
-## 测试策略
+## 串门
 
-- `MinoDomainTests`：值类型、编码兼容性和领域约束。
-- `MinoRuntimeTests`：移动算法和互动状态机，使用确定性时间步长。
-- `MinoInfrastructureTests`：配置优先级、安全校验、请求路径和协议头。
-- `MinoSecurityTests`：凭证生命周期、脱敏和可替换存储行为。
-- `MinoPersistenceTests`：原子持久化、权限、schema 拒绝、去重、容量和退避。
-- 后续增加 `MinoPresentationTests`：节点快照与窗口行为。
-- 后续增加 App 级测试：启动、菜单、跨屏和休眠恢复。
+服务端只保存 `pending → active → ended/cancelled` 和逻辑驻留：
 
-## 下一阶段入口
+- 发起前必须校验双方仍是好友；解除或未接受好友关系不能创建串门。
+- 访客主人主动请求登门时，由接待方宠物 Agent 决定。
+- 接待方邀请对方宠物时，由访客宠物 Agent 决定。
+- 接受后，原端隐藏访客，接待端显示访客；客户端重启会先查询 active visit 恢复这一状态。
+- 来访宠物仍由原主人客户端 Agent 驱动。接待端默认让它打盹；原 Agent 通过 reaction 事件证明在线后才恢复活动。
+- 投喂、玩耍、真人消息以及界面上的亲亲、送花、散步都会转成 visit interaction 送回原 Agent；本地动画不冒充远端回应。
+- 原 Agent 离线时，互动保留在事件流中，不由服务端生成替代回应。
+- 自主回家、原主人召回与接待主人请回均使用同一幂等结束接口。
 
-1. 建立用于签名、Asset Catalog、权限和发行配置的 Xcode App 工程，继续复用现有 SwiftPM 模块。
-2. 基于现有身份模型实现登录、邀请配对和解除配对用例。
-3. 在 Keychain 会话仓库之上加入刷新令牌状态机和串行刷新保护。
-4. 实现 Outbox 投递协调器、网络恢复触发和可观测失败状态。
-5. 服务端契约稳定后生成或验证 OpenAPI 客户端，但保持领域层不依赖生成代码。
+## 信件隐私
+
+文字信正文只进入信件接口和授权收件界面，不进入好友事件、事件摘要、Agent observation、模型上下文或日志。服务端以 AES-256-GCM 存储，收件人只能在串门结束并交付后读取。事件线保存 `letterID`，用户可再次打开；宠物只知道自己携带/带回了一封密封信。
+
+## 仍属后续范围
+
+正式身份注册与账号发现、好友解除/拉黑/举报、跨设备 Agent 主设备选举、图片明信片和物品系统、推送唤醒、完整 E2EE、可观测性与水平扩容不属于本轮 MVP。

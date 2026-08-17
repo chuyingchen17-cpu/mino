@@ -41,6 +41,7 @@ public protocol SessionCredentialStore: Sendable {
 }
 
 public enum KeychainCredentialStoreError: Error, Equatable, Sendable {
+    case invalidNamespace(String)
     case operationFailed(operation: String, status: Int32)
     case invalidPayload
     case unsupportedSchema(Int)
@@ -48,6 +49,7 @@ public enum KeychainCredentialStoreError: Error, Equatable, Sendable {
 
 public actor KeychainSessionCredentialStore: SessionCredentialStore {
     private static let schemaVersion = 1
+    private static let defaultService = "com.mino.app.session"
 
     private let service: String
     private let account: String
@@ -55,6 +57,21 @@ public actor KeychainSessionCredentialStore: SessionCredentialStore {
     public init(service: String = "com.mino.app.session", account: String = "primary") {
         self.service = service
         self.account = account
+    }
+
+    /// Creates a credential store isolated from other local client profiles.
+    /// An empty namespace intentionally preserves the legacy Keychain service.
+    public init(namespace: String) throws {
+        self.service = try Self.serviceName(for: namespace)
+        self.account = "primary"
+    }
+
+    package static func serviceName(for namespace: String) throws -> String {
+        guard isValidNamespace(namespace) else {
+            throw KeychainCredentialStoreError.invalidNamespace(namespace)
+        }
+        guard !namespace.isEmpty else { return defaultService }
+        return "\(defaultService).profile.\(namespace)"
     }
 
     public func load() async throws -> SessionCredential? {
@@ -146,6 +163,18 @@ public actor KeychainSessionCredentialStore: SessionCredentialStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
+    }
+
+    private static func isValidNamespace(_ value: String) -> Bool {
+        guard value.count <= 64 else { return false }
+        return value.unicodeScalars.allSatisfy { scalar in
+            switch scalar.value {
+            case 48...57, 65...90, 97...122, 45, 95:
+                true
+            default:
+                false
+            }
+        }
     }
 }
 

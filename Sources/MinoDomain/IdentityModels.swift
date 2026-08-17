@@ -112,6 +112,7 @@ public struct CoupleSnapshot: Codable, Equatable, Sendable {
     public let partnerPet: PetProfile
     public let serverCursor: String?
     public let syncedAt: Date
+    public let petPresence: PetPresenceSnapshot?
 
     public init(
         context: CoupleContext,
@@ -120,7 +121,8 @@ public struct CoupleSnapshot: Codable, Equatable, Sendable {
         localPet: PetProfile,
         partnerPet: PetProfile,
         serverCursor: String?,
-        syncedAt: Date
+        syncedAt: Date,
+        petPresence: PetPresenceSnapshot? = nil
     ) {
         self.context = context
         self.localAccount = localAccount
@@ -129,6 +131,7 @@ public struct CoupleSnapshot: Codable, Equatable, Sendable {
         self.partnerPet = partnerPet
         self.serverCursor = serverCursor
         self.syncedAt = syncedAt
+        self.petPresence = petPresence
     }
 }
 

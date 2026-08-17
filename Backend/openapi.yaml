@@ -2,8 +2,13 @@ openapi: 3.1.0
 info:
   title: Mino Backend API
   version: 0.1.0
-  description: Initial contract reserved by the macOS client foundation.
+  description: >-
+    Mino MVP contract shared by the macOS clients and service. Every idempotencyKey is bound to
+    the canonical request payload: an exact retry replays the first result, while reusing the key
+    with different input returns 409 idempotency_key_reused.
 servers:
+  - url: http://127.0.0.1:8080/v1
+    description: Local MVP server
   - url: https://api.example.com/mino/v1
     description: Placeholder only; configure the real endpoint at build or launch time.
 paths:
@@ -20,7 +25,680 @@ paths:
                 $ref: "#/components/schemas/HealthEnvelope"
         default:
           $ref: "#/components/responses/APIError"
+  /dev/bootstrap:
+    post:
+      operationId: bootstrapDevelopmentProfile
+      summary: Create or fetch a local development profile
+      description: >-
+        Available only when DEV_BOOTSTRAP_ENABLED=true and never in production. Alice, Bob, and Charlie use
+        deterministic, public local-development tokens so a client session survives service restarts;
+        these credentials are explicitly rejected by the production Postgres store.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DevBootstrapRequest"
+      responses:
+        "200":
+          description: Development identity and bearer token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevProfileEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /me:
+    get:
+      operationId: getCurrentAccount
+      summary: Get the authenticated account and its own pet
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current account context
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthContextEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /friendships:
+    get:
+      operationId: listFriendships
+      summary: List the authenticated account's friendship requests and friends
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/FriendshipStatus"
+      responses:
+        "200":
+          description: Friendships visible to the authenticated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendshipListEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+    post:
+      operationId: requestFriendship
+      summary: Send a friendship request to another account
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestFriendshipCommand"
+      responses:
+        "200":
+          description: Pending friendship
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendshipEnvelope"
+        "409":
+          $ref: "#/components/responses/APIError"
+        default:
+          $ref: "#/components/responses/APIError"
+  /friendships/{friendshipID}/respond:
+    post:
+      operationId: respondToFriendship
+      summary: Accept or reject a friendship request addressed to the account
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: friendshipID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RespondFriendshipCommand"
+      responses:
+        "200":
+          description: Resolved friendship
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendshipEnvelope"
+        "404":
+          $ref: "#/components/responses/APIError"
+        default:
+          $ref: "#/components/responses/APIError"
+  /events:
+    get:
+      operationId: fetchEvents
+      summary: Catch up on durable friendship events after an event cursor
+      description: >-
+        This stream belongs to exactly one accepted friendship. To build a personal account view,
+        list accepted friendships, retain one cursor per friendship, and merge events by occurredAt
+        with sequence as a stable tie-breaker. Friendship requests are listed through /friendships.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: friendshipID
+          in: query
+          required: true
+          description: Accepted friendship that owns the event stream.
+          schema:
+            type: string
+        - name: after
+          in: query
+          required: false
+          description: >-
+            A UUID event ID returned by a previous response. The cursor event is not repeated. An
+            empty page preserves this cursor as nextCursor. A malformed UUID returns 400; an unknown
+            or other-friendship event ID returns 404.
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: Durable events in server sequence order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendshipEventPageEnvelope"
+        "400":
+          $ref: "#/components/responses/APIError"
+        "404":
+          $ref: "#/components/responses/APIError"
+        default:
+          $ref: "#/components/responses/APIError"
+  /timeline:
+    get:
+      operationId: fetchTimeline
+      summary: Fetch only relationship events intended for the visible timeline
+      description: >-
+        Timeline pages are friendship-scoped. A client displaying an account-wide timeline must
+        fetch each accepted friendship independently and merge the pages locally; no event from an
+        unrelated or pending friendship is exposed through this cursor.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: friendshipID
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: after
+          in: query
+          required: false
+          description: Same UUID and empty-page semantics as GET /events.
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: Timeline-visible events; events never include visit duration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendshipEventPageEnvelope"
+        "400":
+          $ref: "#/components/responses/APIError"
+        "404":
+          $ref: "#/components/responses/APIError"
+        default:
+          $ref: "#/components/responses/APIError"
+  /ws:
+    get:
+      operationId: connectEventWebSocket
+      summary: Upgrade to the in-process real-time event stream
+      description: >-
+        Authenticate with Authorization: Bearer. The server first sends WebSocketReady,
+        then WebSocketFriendshipEvent messages. Clients must still use GET /events for durable catch-up.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: friendshipID
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: after
+          in: query
+          required: false
+          description: >-
+            Last durably handled event UUID. The server replays later events while buffering
+            concurrent publications, closing the REST catch-up to WebSocket subscription gap.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "101":
+          description: WebSocket upgrade accepted
+        default:
+          $ref: "#/components/responses/APIError"
+  /agent/decision:
+    post:
+      operationId: requestPetDecision
+      summary: Run one stateless, structured model decision for the caller's pet
+      description: >-
+        The caller supplies an already-minimized context. Prompts, raw provider responses, and pet
+        memories are not persisted. The validated decision, memory disposition, and usage are stored
+        by inferenceID so retries and service restarts replay the original result without another
+        model charge. A live claim returns 409; a stale started claim is treated as outcome-unknown
+        and is never sent upstream again under the same ID. Sealed human
+        letter bodies must never be supplied to this endpoint; state uses a strict allowlist and
+        letter-shaped fields, memories, or non-generic sealed-letter summaries are rejected before
+        the provider can be called. Every social-action recipient must be selected from the accepted
+        pet IDs supplied in state.friendPetIDs.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PetDecisionRequest"
+      responses:
+        "200":
+          description: One policy-bounded decision and local memory disposition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetDecisionResponseEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /conversations:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: listConversations
+      summary: Restore the current friendship's active pet conversation
+      description: >-
+        Returns at most one active conversation because the database enforces one active
+        conversation per friendship. Both participating clients receive the same record after restart.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            const: active
+            default: active
+      responses:
+        "200":
+          description: Friendship-scoped active conversations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationListEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+    post:
+      operationId: createConversation
+      summary: Start a pet conversation with the first public utterance
+      description: >-
+        A friendship may have only one active conversation. Concurrent attempts with different
+        idempotency keys produce one success and stable 409 active_conversation_exists responses.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateConversationCommand"
+      responses:
+        "200":
+          description: Conversation and opening message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationMutationEnvelope"
+        "409":
+          $ref: "#/components/responses/APIError"
+        default:
+          $ref: "#/components/responses/APIError"
+  /conversations/{conversationID}/messages:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: listConversationMessages
+      summary: Restore the ordered transcript for one friendship-scoped conversation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Messages in creation order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationMessageListEnvelope"
+        "404":
+          $ref: "#/components/responses/APIError"
+        default:
+          $ref: "#/components/responses/APIError"
+    post:
+      operationId: sendConversationMessage
+      summary: Add the current pet turn or an explicitly identified human interjection
+      description: >-
+        Pet turns alternate and are capped at six. Accepting turnIndex 5 marks the conversation
+        ended and emits only conversation_message; the server does not synthesize a summary.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendConversationMessageCommand"
+      responses:
+        "200":
+          description: Updated conversation and accepted message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationMutationEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /conversations/{conversationID}/end:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: endConversation
+      summary: Let the initiating pet submit the conversation's one timeline summary
+      description: >-
+        Only the authenticated owner of initiatorPetID may call this route. It remains valid after
+        the sixth turn has already marked the conversation ended, allowing the initiator's local
+        Agent to submit the first summary. Later calls never create a second summary.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EndConversationCommand"
+      responses:
+        "200":
+          description: Ended conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /visit-invitations:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: listMVPVisitInvitations
+      summary: List friendship-scoped visit records, pending by default
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/MVPVisitStatus"
+      responses:
+        "200":
+          description: Matching visit records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MVPVisitListEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+    post:
+      operationId: createMVPVisitInvitation
+      summary: Ask for one pet to visit the other account
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVisitInvitationCommand"
+      responses:
+        "200":
+          description: Pending visit invitation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MVPVisitEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /visit-invitations/{visitID}/respond:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: respondToMVPVisitInvitation
+      summary: Let the account opposite the invitation requester accept or decline
+      description: >-
+        Only the other party may respond. If requestedByAccountID is the visitor owner, the host
+        responds; if the host requested the visit, the visitor owner responds.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: visitID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RespondToMVPVisitCommand"
+      responses:
+        "200":
+          description: Active or cancelled visit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MVPVisitEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /visits/{visitID}/interactions:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: sendVisitInteraction
+      summary: Let the host feed, play with, or message the visiting pet
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: visitID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisitInteractionCommand"
+      responses:
+        "200":
+          description: Accepted interaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisitInteractionEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /visits/{visitID}/reactions:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: sendVisitReaction
+      summary: Relay the visiting pet Agent's reaction back to the host desktop
+      description: >-
+        Only the visitor pet's owner may call this route. The server validates and relays the
+        reaction but never decides it. visit_reaction events are not timeline-visible.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: visitID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisitReactionCommand"
+      responses:
+        "200":
+          description: Accepted visitor reaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisitReactionEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /visits/{visitID}/letter:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: attachVisitLetter
+      summary: Attach a private plain-text human letter to an active visiting pet
+      description: >-
+        The API accepts plain text over HTTPS, while PostgreSQL stores AES-256-GCM ciphertext in both
+        the letter record and any idempotency receipt. The body is never copied into FriendshipEvent
+        payloads, Agent requests, model prompts, or timeline summaries.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: visitID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVisitLetterCommand"
+      responses:
+        "200":
+          description: Letter carried until the visit ends
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LetterEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /letters/{letterID}:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: fetchLetter
+      summary: Read a private letter when the authenticated account is allowed
+      description: >-
+        The author can read their own letter. The recipient receives a uniform 404 until the
+        visit has ended and the letter status is delivered. Accounts outside the letter's friendship
+        or outside its author/recipient pair also receive 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: letterID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Authorized private letter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LetterEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /visits/{visitID}/end:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: endMVPVisit
+      summary: Return the pet home and atomically deliver carried letters
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: visitID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdempotentCommand"
+      responses:
+        "200":
+          description: Ended visit and delivered letter records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EndVisitEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
   /interactions:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
     post:
       operationId: sendInteraction
       summary: Deliver an idempotent interaction to the paired pet
@@ -52,6 +730,216 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InteractionReceiptEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /pet-presence:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: fetchPetPresence
+      summary: Fetch the server-authoritative location of both pets and active visits
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current pet presence snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetPresenceSnapshotEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /pet-visits:
+    post:
+      operationId: startPetVisit
+      deprecated: true
+      summary: Deprecated direct visit endpoint; use the invitation handshake
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartPetVisitCommand"
+      responses:
+        "409":
+          $ref: "#/components/responses/APIError"
+        default:
+          $ref: "#/components/responses/APIError"
+  /pet-visits/{visitID}/return:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: returnPetVisit
+      summary: Start the pet's return trip and attach return cargo
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: visitID
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReturnPetVisitCommand"
+      responses:
+        "200":
+          description: Return accepted with authoritative presence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetVisitReceiptEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /pet-visit-invitations:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: fetchPetVisitInvitations
+      summary: Fetch invitations addressed to the signed-in friend
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, accepted, declined, cancelled, expired]
+      responses:
+        "200":
+          description: Matching invitations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetVisitInvitationListEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+    post:
+      operationId: sendPetVisitInvitation
+      summary: Invite the selected friend to send their pet for a visit
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendPetVisitInvitationCommand"
+      responses:
+        "200":
+          description: Invitation accepted for delivery
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetVisitInvitationEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /pet-visit-invitations/{invitationID}/response:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: respondToPetVisitInvitation
+      summary: Accept or decline a visit invitation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: invitationID
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RespondToPetVisitInvitationCommand"
+      responses:
+        "200":
+          description: Response accepted; an accepted invitation may start a visit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetVisitInvitationReceiptEnvelope"
+        default:
+          $ref: "#/components/responses/APIError"
+  /friendship-events:
+    parameters:
+      - name: friendshipID
+        in: query
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: fetchFriendshipTimeline
+      summary: Incrementally fetch durable friendship and visit events
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: after
+          in: query
+          required: false
+          description: A UUID event ID; malformed values return 400 and unknown or cross-friendship IDs return 404.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Events after the supplied cursor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendshipTimelinePageEnvelope"
         default:
           $ref: "#/components/responses/APIError"
 components:
@@ -94,7 +982,7 @@ components:
           format: uuid
         kind:
           type: string
-          enum: [kiss, flower_gift]
+          enum: [kiss, flower_gift, walk]
         senderPetID:
           type: string
           minLength: 1
@@ -121,6 +1009,1354 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/InteractionReceipt"
+    PetCargoItem:
+      type: object
+      additionalProperties: false
+      required: [itemID, kind, displayName, quantity]
+      properties:
+        itemID:
+          type: string
+          minLength: 1
+        kind:
+          type: string
+          enum: [gift, keepsake, consumable, letter, custom]
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 99
+    PetPresenceRecord:
+      type: object
+      additionalProperties: false
+      required: [petID, ownerAccountID, phase, revision, updatedAt]
+      properties:
+        petID:
+          type: string
+          minLength: 1
+        ownerAccountID:
+          type: string
+          minLength: 1
+        phase:
+          type: string
+          enum: [at_home, outbound, visiting, returning]
+        currentHostAccountID:
+          type: [string, "null"]
+          description: >-
+            The current friendship's host. Null while the pet is visiting through a different
+            friendship, so that relationship remains private.
+        activeVisitID:
+          type: [string, "null"]
+          description: >-
+            The current friendship's active visit ID. Null while the pet is globally away through
+            a different friendship.
+        revision:
+          type: integer
+          format: int64
+          minimum: 0
+        updatedAt:
+          type: string
+          format: date-time
+      description: >-
+        A pet has exactly one authoritative location. at_home requires the owner as
+        current host and no active visit. visiting exposes the host and active visit only when
+        they belong to the requested friendship; both identifiers are null for a visit through
+        another friendship. outbound/returning require no current host.
+    PetVisitJourney:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - friendshipID
+        - petID
+        - ownerAccountID
+        - hostAccountID
+        - phase
+        - outboundCargo
+        - returnCargo
+        - revision
+        - departedAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+        friendshipID:
+          type: string
+          minLength: 1
+        petID:
+          type: string
+          minLength: 1
+        ownerAccountID:
+          type: string
+          minLength: 1
+        hostAccountID:
+          type: string
+          minLength: 1
+        phase:
+          type: string
+          enum: [outbound, visiting, returning, completed, cancelled]
+        outboundCargo:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/PetCargoItem"
+        returnCargo:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/PetCargoItem"
+        revision:
+          type: integer
+          format: int64
+          minimum: 0
+        departedAt:
+          type: string
+          format: date-time
+        arrivedAt:
+          type: [string, "null"]
+          format: date-time
+        returnStartedAt:
+          type: [string, "null"]
+          format: date-time
+        completedAt:
+          type: [string, "null"]
+          format: date-time
+    PetPresenceSnapshot:
+      type: object
+      additionalProperties: false
+      required: [friendshipID, pets, activeVisits, syncedAt]
+      properties:
+        friendshipID:
+          type: string
+          minLength: 1
+        pets:
+          type: array
+          items:
+            $ref: "#/components/schemas/PetPresenceRecord"
+        activeVisits:
+          type: array
+          description: Active visits belonging to the requested friendship only.
+          items:
+            $ref: "#/components/schemas/PetVisitJourney"
+        serverCursor:
+          type: [string, "null"]
+        syncedAt:
+          type: string
+          format: date-time
+    PetPresenceSnapshotEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PetPresenceSnapshot"
+    StartPetVisitCommand:
+      type: object
+      additionalProperties: false
+      required:
+        - idempotencyKey
+        - petID
+        - destinationAccountID
+        - outboundCargo
+        - expectedPresenceRevision
+        - clientCreatedAt
+      properties:
+        idempotencyKey:
+          type: string
+          format: uuid
+        petID:
+          type: string
+          minLength: 1
+        destinationAccountID:
+          type: string
+          minLength: 1
+        outboundCargo:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/PetCargoItem"
+        expectedPresenceRevision:
+          type: integer
+          format: int64
+          minimum: 0
+        clientCreatedAt:
+          type: string
+          format: date-time
+    ReturnPetVisitCommand:
+      type: object
+      additionalProperties: false
+      required:
+        - idempotencyKey
+        - visitID
+        - returnCargo
+        - expectedVisitRevision
+        - clientCreatedAt
+      properties:
+        idempotencyKey:
+          type: string
+          format: uuid
+        visitID:
+          type: string
+          minLength: 1
+        returnCargo:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/PetCargoItem"
+        expectedVisitRevision:
+          type: integer
+          format: int64
+          minimum: 0
+        clientCreatedAt:
+          type: string
+          format: date-time
+    PetVisitReceipt:
+      type: object
+      additionalProperties: false
+      required: [visit, presence, acceptedAt]
+      properties:
+        visit:
+          $ref: "#/components/schemas/PetVisitJourney"
+        presence:
+          $ref: "#/components/schemas/PetPresenceRecord"
+        acceptedAt:
+          type: string
+          format: date-time
+    PetVisitReceiptEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PetVisitReceipt"
+    PetVisitInvitation:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - friendshipID
+        - inviterAccountID
+        - invitedAccountID
+        - requestedPetID
+        - hostAccountID
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+        friendshipID:
+          type: string
+          minLength: 1
+        inviterAccountID:
+          type: string
+          minLength: 1
+        invitedAccountID:
+          type: string
+          minLength: 1
+        requestedPetID:
+          type: string
+          minLength: 1
+        hostAccountID:
+          type: string
+          minLength: 1
+        status:
+          type: string
+          enum: [pending, accepted, declined, cancelled, expired]
+        createdAt:
+          type: string
+          format: date-time
+        respondedAt:
+          type: [string, "null"]
+          format: date-time
+    SendPetVisitInvitationCommand:
+      type: object
+      additionalProperties: false
+      required: [idempotencyKey, requestedPetID, clientCreatedAt]
+      properties:
+        idempotencyKey:
+          type: string
+          format: uuid
+        requestedPetID:
+          type: string
+          minLength: 1
+        clientCreatedAt:
+          type: string
+          format: date-time
+    RespondToPetVisitInvitationCommand:
+      type: object
+      additionalProperties: false
+      required:
+        - idempotencyKey
+        - invitationID
+        - response
+        - expectedPresenceRevision
+        - clientCreatedAt
+      properties:
+        idempotencyKey:
+          type: string
+          format: uuid
+        invitationID:
+          type: string
+          minLength: 1
+        response:
+          type: string
+          enum: [accept, decline]
+        expectedPresenceRevision:
+          type: integer
+          format: int64
+          minimum: 0
+        clientCreatedAt:
+          type: string
+          format: date-time
+    PetVisitInvitationReceipt:
+      type: object
+      additionalProperties: false
+      required: [invitation, acceptedAt]
+      properties:
+        invitation:
+          $ref: "#/components/schemas/PetVisitInvitation"
+        visit:
+          oneOf:
+            - $ref: "#/components/schemas/PetVisitJourney"
+            - type: "null"
+        presence:
+          oneOf:
+            - $ref: "#/components/schemas/PetPresenceRecord"
+            - type: "null"
+        acceptedAt:
+          type: string
+          format: date-time
+    FriendshipTimelineEvent:
+      type: object
+      additionalProperties: false
+      required: [id, kind, occurredAt]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        kind:
+          type: string
+          enum:
+            - visit_invited
+            - visit_arrived
+            - visit_returned
+            - invitation_declined
+            - visit_declined
+            - interaction
+            - visit_interaction
+            - visit_reaction
+            - conversation_summary
+            - letter_received
+            - cargo_received
+            - postcard_received
+        occurredAt:
+          type: string
+          format: date-time
+        petID:
+          type: [string, "null"]
+        visitID:
+          type: [string, "null"]
+        invitationID:
+          type: [string, "null"]
+        actorAccountID:
+          type: [string, "null"]
+        interactionKind:
+          type: [string, "null"]
+          enum: [kiss, flower_gift, walk, feed, play, message, null]
+        summary:
+          type: [string, "null"]
+          maxLength: 500
+        cargoItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/PetCargoItem"
+        postcard:
+          oneOf:
+            - $ref: "#/components/schemas/PetPostcard"
+            - type: "null"
+    PetPostcard:
+      type: object
+      additionalProperties: false
+      required: [id, title, createdAt]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        message:
+          type: [string, "null"]
+          maxLength: 500
+        imageURL:
+          type: [string, "null"]
+          format: uri
+        createdAt:
+          type: string
+          format: date-time
+    FriendshipTimelinePage:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/FriendshipTimelineEvent"
+        nextCursor:
+          type: [string, "null"]
+    PetVisitInvitationEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PetVisitInvitation"
+    PetVisitInvitationListEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PetVisitInvitation"
+    PetVisitInvitationReceiptEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PetVisitInvitationReceipt"
+    FriendshipTimelinePageEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/FriendshipTimelinePage"
+    FriendshipStatus:
+      type: string
+      enum: [pending, accepted, rejected]
+    FriendAccount:
+      type: object
+      additionalProperties: false
+      required: [accountID, displayName, petID, petName]
+      properties:
+        accountID:
+          type: string
+        displayName:
+          type: string
+        petID:
+          type: string
+        petName:
+          type: string
+    Friendship:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - requesterAccountID
+        - addresseeAccountID
+        - status
+        - createdAt
+        - respondedAt
+        - friend
+      properties:
+        id:
+          type: string
+        requesterAccountID:
+          type: string
+        addresseeAccountID:
+          type: string
+        status:
+          $ref: "#/components/schemas/FriendshipStatus"
+        createdAt:
+          type: string
+          format: date-time
+        respondedAt:
+          type: [string, "null"]
+          format: date-time
+        friend:
+          $ref: "#/components/schemas/FriendAccount"
+    FriendshipEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/Friendship"
+    FriendshipListEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Friendship"
+    RequestFriendshipCommand:
+      type: object
+      additionalProperties: false
+      required: [addresseeAccountID, idempotencyKey]
+      properties:
+        addresseeAccountID:
+          type: string
+        idempotencyKey:
+          type: string
+          format: uuid
+    RespondFriendshipCommand:
+      type: object
+      additionalProperties: false
+      required: [response, idempotencyKey]
+      properties:
+        response:
+          type: string
+          enum: [accept, reject]
+        idempotencyKey:
+          type: string
+          format: uuid
+    DevBootstrapRequest:
+      type: object
+      additionalProperties: false
+      required: [profile]
+      properties:
+        profile:
+          type: string
+          enum: [alice, bob, charlie]
+    AuthContext:
+      type: object
+      additionalProperties: false
+      required: [accountID, petID]
+      properties:
+        accountID:
+          type: string
+        petID:
+          type: string
+    AuthContextEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/AuthContext"
+    DevFriend:
+      type: object
+      additionalProperties: false
+      required: [friendshipID, accountID, petID, accountName, petName]
+      properties:
+        friendshipID:
+          type: string
+        accountID:
+          type: string
+        petID:
+          type: string
+        accountName:
+          type: string
+        petName:
+          type: string
+    DevProfile:
+      type: object
+      additionalProperties: false
+      required:
+        - profile
+        - token
+        - accountID
+        - petID
+        - accountName
+        - petName
+        - friends
+      properties:
+        profile:
+          type: string
+          enum: [alice, bob, charlie]
+        token:
+          type: string
+          description: >-
+            Deterministic, public local-development bearer credential. Store it in the
+            profile-specific Keychain; it survives restarts and is rejected in production.
+        accountID:
+          type: string
+        petID:
+          type: string
+        accountName:
+          type: string
+        petName:
+          type: string
+        friends:
+          type: array
+          items:
+            $ref: "#/components/schemas/DevFriend"
+    DevProfileEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/DevProfile"
+    FriendshipEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - sequence
+        - friendshipID
+        - type
+        - actorType
+        - actorID
+        - payload
+        - timelineVisible
+        - occurredAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        sequence:
+          type: integer
+          format: int64
+          minimum: 1
+        friendshipID:
+          type: string
+        type:
+          type: string
+          enum:
+            - conversation_message
+            - conversation_summary
+            - visit_invited
+            - visit_arrived
+            - visit_declined
+            - visit_interaction
+            - visit_reaction
+            - letter_attached
+            - visit_returned
+            - letter_received
+            - interaction
+        actorType:
+          type: string
+          enum: [human, pet, system]
+        actorID:
+          type: [string, "null"]
+        payload:
+          type: object
+          additionalProperties: true
+          description: >-
+            Event-specific public routing data. conversation_message uses conversationID, messageID,
+            recipientPetID, text, turnIndex. conversation_summary uses conversationID, summary.
+            visit_invited uses visitID, visitorPetID, hostAccountID, requestedByAccountID,
+            responderAccountID, reason. visit_arrived and visit_declined use visitID, visitorPetID,
+            hostAccountID, requestedByAccountID, responderAccountID. visit_interaction uses
+            interactionID, visitID, visitorPetID, kind and optional text. visit_reaction uses
+            visitID, visitorPetID, reaction and optional text. letter_attached uses
+            letterID, visitID, recipientAccountID. visit_returned uses visitID, visitorPetID.
+            letter_received uses letterID, visitID, authorAccountID, recipientAccountID.
+            Letter bodies are categorically forbidden from event payloads.
+        timelineVisible:
+          type: boolean
+        occurredAt:
+          type: string
+          format: date-time
+    FriendshipEventPage:
+      type: object
+      additionalProperties: false
+      required: [events, nextCursor]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/FriendshipEvent"
+        nextCursor:
+          type: [string, "null"]
+          description: The final returned event ID, or the supplied after cursor when the page is empty.
+    FriendshipEventPageEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/FriendshipEventPage"
+    WebSocketReady:
+      type: object
+      additionalProperties: false
+      required: [type, cursor]
+      properties:
+        type:
+          type: string
+          const: ready
+        cursor:
+          type: [string, "null"]
+    WebSocketFriendshipEvent:
+      type: object
+      additionalProperties: false
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: friendship_event
+        data:
+          $ref: "#/components/schemas/FriendshipEvent"
+    PetDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [inferenceID, petID, trigger, state, memories, availableActions]
+      properties:
+        inferenceID:
+          type: string
+          minLength: 1
+          maxLength: 128
+        petID:
+          type: string
+          minLength: 1
+        trigger:
+          type: object
+          additionalProperties: false
+          required: [type, summary]
+          properties:
+            type:
+              type: string
+              enum:
+                - owner_message
+                - owner_interaction
+                - remote_human_message
+                - pet_message
+                - conversation_ended
+                - visit_invitation
+                - visit_interaction
+                - visit_started
+                - visit_ended
+                - sealed_human_letter_available
+                - periodic_wake
+            summary:
+              type: string
+              maxLength: 1000
+        state:
+          type: object
+          additionalProperties: false
+          properties:
+            location:
+              type: string
+              enum: [home, visiting]
+            visitID:
+              type: string
+              minLength: 1
+            emotion:
+              type: string
+              enum: [content, happy, shy]
+            autonomousSocialEnabled:
+              type: boolean
+            ownerAccountID:
+              type: string
+              minLength: 1
+            friendshipID:
+              type: string
+              minLength: 1
+            friendPetIDs:
+              type: array
+              maxItems: 100
+              uniqueItems: true
+              description: Accepted friend pet IDs that the model may select as a social-action target.
+              items:
+                type: string
+                minLength: 1
+                maxLength: 128
+            targetPetID:
+              type: string
+              minLength: 1
+            invitationID:
+              type: string
+              minLength: 1
+            senderPetID:
+              type: string
+              minLength: 1
+            currentEventVisitID:
+              type: string
+              minLength: 1
+        memories:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [summary]
+            properties:
+              summary:
+                type: string
+                maxLength: 1000
+              kind:
+                type: string
+                enum: [owner, friend_pet, visit, interaction, general]
+        availableActions:
+          type: array
+          uniqueItems: true
+          maxItems: 7
+          items:
+            type: string
+            enum:
+              - idle
+              - speak_to_owner
+              - send_pet_message
+              - propose_visit
+              - respond_to_visit
+              - react_to_interaction
+              - request_return
+    PetDecision:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind]
+          properties:
+            kind:
+              type: string
+              const: idle
+        - type: object
+          additionalProperties: false
+          required: [kind, text]
+          properties:
+            kind:
+              type: string
+              const: speak_to_owner
+            text:
+              type: string
+        - type: object
+          additionalProperties: false
+          required: [kind, recipientPetID, text]
+          properties:
+            kind:
+              type: string
+              const: send_pet_message
+            recipientPetID:
+              type: string
+            text:
+              type: string
+        - type: object
+          additionalProperties: false
+          required: [kind, recipientPetID, reason]
+          properties:
+            kind:
+              type: string
+              const: propose_visit
+            recipientPetID:
+              type: string
+            reason:
+              type: string
+        - type: object
+          additionalProperties: false
+          required: [kind, invitationID, response]
+          properties:
+            kind:
+              type: string
+              const: respond_to_visit
+            invitationID:
+              type: string
+            response:
+              type: string
+              enum: [accept, decline]
+            reply:
+              type: string
+        - type: object
+          additionalProperties: false
+          required: [kind, reaction]
+          properties:
+            kind:
+              type: string
+              const: react_to_interaction
+            reaction:
+              type: string
+              enum: [happy, excited, shy, sleepy]
+            text:
+              type: string
+        - type: object
+          additionalProperties: false
+          required: [kind, visitID]
+          properties:
+            kind:
+              type: string
+              const: request_return
+            visitID:
+              type: string
+      discriminator:
+        propertyName: kind
+    MemoryDisposition:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind]
+          properties:
+            kind:
+              type: string
+              const: discard
+        - type: object
+          additionalProperties: false
+          required: [kind]
+          properties:
+            kind:
+              type: string
+              const: session
+        - type: object
+          additionalProperties: false
+          required: [kind, summary, reason]
+          properties:
+            kind:
+              type: string
+              const: long_term
+            summary:
+              type: string
+              maxLength: 500
+            reason:
+              type: string
+              maxLength: 240
+      discriminator:
+        propertyName: kind
+    PetDecisionResponse:
+      type: object
+      additionalProperties: false
+      required: [inferenceID, decision, memoryDisposition, replayed, usage]
+      properties:
+        inferenceID:
+          type: string
+        decision:
+          $ref: "#/components/schemas/PetDecision"
+        memoryDisposition:
+          $ref: "#/components/schemas/MemoryDisposition"
+        replayed:
+          type: boolean
+          description: True when this is the original persisted decision replayed for the same inferenceID.
+        usage:
+          type: object
+          additionalProperties: false
+          required: [inputTokens, outputTokens]
+          properties:
+            inputTokens:
+              type: integer
+              minimum: 0
+            outputTokens:
+              type: integer
+              minimum: 0
+    PetDecisionResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PetDecisionResponse"
+    Conversation:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - friendshipID
+        - initiatorPetID
+        - recipientPetID
+        - status
+        - nextSpeakerPetID
+        - turnCount
+        - createdAt
+        - endedAt
+      properties:
+        id:
+          type: string
+        friendshipID:
+          type: string
+        initiatorPetID:
+          type: string
+        recipientPetID:
+          type: string
+        status:
+          type: string
+          enum: [active, ended]
+        nextSpeakerPetID:
+          type: [string, "null"]
+        turnCount:
+          type: integer
+          minimum: 1
+          maximum: 6
+        createdAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: [string, "null"]
+          format: date-time
+    ConversationMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - conversationID
+        - friendshipID
+        - actorType
+        - actorID
+        - recipientPetID
+        - text
+        - turnIndex
+        - createdAt
+      properties:
+        id:
+          type: string
+        conversationID:
+          type: string
+        friendshipID:
+          type: string
+        actorType:
+          type: string
+          enum: [human, pet]
+        actorID:
+          type: string
+        recipientPetID:
+          type: string
+        text:
+          type: string
+          maxLength: 500
+        turnIndex:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 5
+        createdAt:
+          type: string
+          format: date-time
+    ConversationMutation:
+      type: object
+      additionalProperties: false
+      required: [conversation, message]
+      properties:
+        conversation:
+          $ref: "#/components/schemas/Conversation"
+        message:
+          $ref: "#/components/schemas/ConversationMessage"
+    ConversationMutationEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/ConversationMutation"
+    ConversationListEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          type: array
+          maxItems: 1
+          items:
+            $ref: "#/components/schemas/Conversation"
+    ConversationMessageListEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConversationMessage"
+    ConversationEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/Conversation"
+    CreateConversationCommand:
+      type: object
+      additionalProperties: false
+      required: [recipientPetID, openingMessage, idempotencyKey]
+      properties:
+        recipientPetID:
+          type: string
+        openingMessage:
+          type: string
+          minLength: 1
+          maxLength: 500
+        idempotencyKey:
+          type: string
+          format: uuid
+    SendConversationMessageCommand:
+      type: object
+      additionalProperties: false
+      required: [actorType, text, idempotencyKey]
+      properties:
+        actorType:
+          type: string
+          enum: [human, pet]
+          description: The server derives actorID from authentication and never trusts a caller-supplied actor ID.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 500
+        idempotencyKey:
+          type: string
+          format: uuid
+    EndConversationCommand:
+      type: object
+      additionalProperties: false
+      required: [summary, idempotencyKey]
+      properties:
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: A concise summary generated by the initiating pet's local Agent.
+        idempotencyKey:
+          type: string
+          format: uuid
+    MVPVisitStatus:
+      type: string
+      enum: [pending, active, ended, cancelled]
+    MVPVisit:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - friendshipID
+        - visitorPetID
+        - visitorOwnerAccountID
+        - hostAccountID
+        - requestedByAccountID
+        - reason
+        - status
+        - createdAt
+        - startedAt
+        - endedAt
+      properties:
+        id:
+          type: string
+        friendshipID:
+          type: string
+        visitorPetID:
+          type: string
+        visitorOwnerAccountID:
+          type: string
+        hostAccountID:
+          type: string
+        requestedByAccountID:
+          type: string
+          description: >-
+            Invitation initiator. The responder is always the other party: hostAccountID when this
+            equals visitorOwnerAccountID, otherwise visitorOwnerAccountID.
+        reason:
+          type: [string, "null"]
+        status:
+          $ref: "#/components/schemas/MVPVisitStatus"
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: [string, "null"]
+          format: date-time
+        endedAt:
+          type: [string, "null"]
+          format: date-time
+    MVPVisitEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/MVPVisit"
+    MVPVisitListEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MVPVisit"
+    CreateVisitInvitationCommand:
+      type: object
+      additionalProperties: false
+      required: [visitorPetID, hostAccountID, idempotencyKey]
+      properties:
+        visitorPetID:
+          type: string
+        hostAccountID:
+          type: string
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 240
+        idempotencyKey:
+          type: string
+          format: uuid
+          description: Exact retries replay; reuse with a different request payload returns 409.
+    RespondToMVPVisitCommand:
+      type: object
+      additionalProperties: false
+      required: [response, idempotencyKey]
+      properties:
+        response:
+          type: string
+          enum: [accept, decline]
+        idempotencyKey:
+          type: string
+          format: uuid
+          description: Exact retries replay; reuse with a different request payload returns 409.
+    VisitInteractionCommand:
+      type: object
+      additionalProperties: false
+      required: [kind, idempotencyKey]
+      properties:
+        kind:
+          type: string
+          enum: [feed, play, message]
+        text:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Required when kind is message.
+        idempotencyKey:
+          type: string
+          format: uuid
+    VisitInteractionReceipt:
+      type: object
+      additionalProperties: false
+      required: [interactionID, visitID, kind, acceptedAt]
+      properties:
+        interactionID:
+          type: string
+          format: uuid
+        visitID:
+          type: string
+        kind:
+          type: string
+          enum: [feed, play, message]
+        acceptedAt:
+          type: string
+          format: date-time
+    VisitInteractionEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/VisitInteractionReceipt"
+    VisitReactionCommand:
+      type: object
+      additionalProperties: false
+      required: [reaction, idempotencyKey]
+      properties:
+        reaction:
+          type: string
+          minLength: 1
+          maxLength: 80
+        text:
+          type: string
+          minLength: 1
+          maxLength: 500
+        idempotencyKey:
+          type: string
+          format: uuid
+    VisitReactionReceipt:
+      type: object
+      additionalProperties: false
+      required: [reactionID, visitID, reaction, acceptedAt]
+      properties:
+        reactionID:
+          type: string
+          format: uuid
+        visitID:
+          type: string
+        reaction:
+          type: string
+          maxLength: 80
+        acceptedAt:
+          type: string
+          format: date-time
+    VisitReactionEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/VisitReactionReceipt"
+    Letter:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - friendshipID
+        - visitID
+        - authorAccountID
+        - recipientAccountID
+        - body
+        - status
+        - createdAt
+        - deliveredAt
+      properties:
+        id:
+          type: string
+        friendshipID:
+          type: string
+        visitID:
+          type: string
+        authorAccountID:
+          type: string
+        recipientAccountID:
+          type: string
+        body:
+          type: string
+          maxLength: 2000
+          description: >-
+            Private human-authored content. Encrypted with server-side AES-256-GCM at rest and never
+            copied into events or model input. This API representation is decrypted only for an
+            authorized author or a recipient after delivery.
+        status:
+          type: string
+          enum: [carried, delivered]
+        createdAt:
+          type: string
+          format: date-time
+        deliveredAt:
+          type: [string, "null"]
+          format: date-time
+    CreateVisitLetterCommand:
+      type: object
+      additionalProperties: false
+      required: [body, idempotencyKey]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        idempotencyKey:
+          type: string
+          format: uuid
+          description: Exact retries replay; its persisted receipt contains ciphertext, not the body.
+    LetterEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/Letter"
+    IdempotentCommand:
+      type: object
+      additionalProperties: false
+      required: [idempotencyKey]
+      properties:
+        idempotencyKey:
+          type: string
+          format: uuid
+    EndVisitReceipt:
+      type: object
+      additionalProperties: false
+      required: [visit, deliveredLetters]
+      properties:
+        visit:
+          $ref: "#/components/schemas/MVPVisit"
+        deliveredLetters:
+          type: array
+          items:
+            $ref: "#/components/schemas/Letter"
+    EndVisitEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EndVisitReceipt"
     APIErrorBody:
       type: object
       additionalProperties: false

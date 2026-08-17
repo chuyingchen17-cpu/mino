@@ -1,58 +1,55 @@
 # Mino
 
-Mino 是一个原生 macOS 情侣桌宠应用。仓库目前处于“生产地基 + 可运行 Demo”阶段：保留可展示的双宠物体验，同时把领域、运行时、渲染和基础设施拆成可独立测试的模块。
+Mino 是一个原生 macOS 个人桌宠社交 MVP。每个账号拥有自己的宠物和本地 Agent；成为好友后，宠物才能自主对话、串门和携带文字信。服务端负责好友授权、模型代理、会话/串门协调、加密信件和持久事件转发，不保存桌面坐标，也不会在客户端离线时替宠物作决定。
 
-## 快速开始
+## 单 Mac 双客户端体验
 
-要求：macOS 14+、Swift 6.2+。
+要求：macOS 14+、Swift 6.2+、Node.js 20+，以及已启动的 Docker/OrbStack。
 
 ```sh
-Scripts/test.sh
+Scripts/dev-dual-clients.sh
+```
+
+脚本会启动仓库内的 PostgreSQL 与 TypeScript 后端，执行迁移，并生成两个带独立 Bundle ID 和远端配置的 Debug 应用包：
+
+- `.build/dual-clients/Mino-alice.app`：Alice / 奶糖，独立 Application Support、Keychain 与左半屏活动区域。
+- `.build/dual-clients/Mino-bob.app`：Bob / 团子，独立 Application Support、Keychain 与右半屏活动区域。
+
+开发身份会自动 bootstrap，Alice 与 Bob 预置为好友。宠物可自主联系、完成最多六轮对话、生成事件摘要、提出/接受串门；接待主人可以投喂、玩耍、发送真人消息和托付文字信。按 `Control-C` 会结束脚本启动的客户端和后端进程。
+
+若只体验本地离线界面：
+
+```sh
 Scripts/build-app.sh
 open .build/Mino.app
 ```
 
-使用菜单栏的 `♡` 播放完整 Demo，或单独触发亲亲、送花、散步和换装。
-
-Release 构建：
+## 验证
 
 ```sh
-MINO_BUILD_CONFIGURATION=release Scripts/build-app.sh
+Scripts/test.sh
 ```
+
+该命令运行全部 Swift 测试、后端 TypeScript 检查和后端测试。CI 还会启动 PostgreSQL、执行迁移和真实数据库集成测试。
 
 ## 工程结构
 
 ```text
 Sources/
-  MinoDomain/          纯领域模型与服务协议
-  MinoRuntime/         宠物世界、移动和互动状态机
-  MinoPresentation/    AppKit / SpriteKit 窗口与渲染
-  MinoInfrastructure/  配置、日志和后端客户端
-  MinoSecurity/        Keychain 会话凭证
-  MinoPersistence/     情侣快照与离线互动队列
-  MinoApp/             应用入口与依赖组装
-Tests/                 按模块拆分的测试
-Backend/openapi.yaml   预留的 v1 后端契约
-Docs/                  架构与后端接入说明
+  MinoDomain/          领域模型、事件与服务协议
+  MinoAgent/           本地宠物 Agent、策略护栏、上下文和加密记忆
+  MinoRuntime/         宠物移动、互动与逻辑可见状态
+  MinoPresentation/    AppKit / SpriteKit / SwiftUI 界面
+  MinoInfrastructure/  REST、WebSocket、配置和日志
+  MinoSecurity/        会话与记忆密钥的 Keychain 实现
+  MinoPersistence/     事件游标、时间线、快照与离线 Outbox
+  MinoApp/             协调器和应用组合根
+Backend/               Fastify + Kysely + PostgreSQL 单进程服务
+Scripts/               构建、测试和双客户端启动脚本
 ```
 
-详细依赖规则见 [Architecture](Docs/Architecture.md)，后端约定见 [Backend Contract](Docs/BackendContract.md)。
+共同协议由 [`Backend/openapi.yaml`](Backend/openapi.yaml) 定义。架构边界见 [`Docs/Architecture.md`](Docs/Architecture.md)，接口说明见 [`Docs/BackendContract.md`](Docs/BackendContract.md)。
 
-## 后端模式
+## MVP 边界
 
-默认是 `offline`，不会发出网络请求。远端联调时使用环境变量覆盖：
-
-```sh
-MINO_BACKEND_MODE=remote \
-MINO_API_BASE_URL=https://api.example.com/mino \
-MINO_API_VERSION=v1 \
-Scripts/build-app.sh
-```
-
-构建脚本会把以上非敏感配置写入产物的 Info.plist；直接运行可执行文件时，环境变量仍可在启动时覆盖它们。访问令牌通过 Keychain 支持的 `AccessTokenProvider` 读取，不能写入仓库、Info.plist、本地 JSON 或日志。
-
-## 当前边界
-
-已有：原生双窗口桌宠、组合式形象、互动状态机、离线 Demo、模块化工程、HTTP 后端适配层、Keychain 会话仓库、版本化本地快照、离线互动 Outbox、CI 和签名预留。
-
-尚未实现：正式登录/配对界面、Token 刷新接口、服务端同步协调器、推送或实时通道、正式素材流水线、发行与自动更新。
+当前不包含正式注册登录、账号搜索与推荐、拉黑举报、多 Agent 设备选主、图片明信片、复杂库存、完整端到端加密、发行签名和自动更新。文字信使用 HTTPS/WSS 传输并由服务端 AES-256-GCM 加密存储；不宣称端到端加密。
