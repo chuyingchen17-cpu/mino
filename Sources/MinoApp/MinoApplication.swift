@@ -51,16 +51,18 @@ enum MinoApplication {
         application.run()
     }
 
-    private static func requiresLiveConfiguration(
-        bundle: Bundle = .main,
+    package static func requiresLiveConfiguration(
+        info: [String: Any] = Bundle.main.infoDictionary ?? [:],
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Bool {
-        let info = bundle.infoDictionary ?? [:]
         let mode = environment["MINO_BACKEND_MODE"]
             ?? info["MinoBackendMode"] as? String
         let profile = environment["MINO_CLIENT_PROFILE"]
             ?? info["MinoClientProfile"] as? String
-        return mode?.lowercased() == "remote"
+        // The standard product defaults to Mino Cloud even when a SwiftPM/Xcode
+        // executable has no Info.plist. Only an explicit offline standard run
+        // may recover to the local backend after a malformed optional setting.
+        return mode?.lowercased() != "offline"
             || !(profile?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 

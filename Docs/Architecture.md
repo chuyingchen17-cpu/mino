@@ -1,66 +1,134 @@
-# Mino MVP 架构
+# Mino 架构
 
-## 核心边界
+## 系统边界
 
-每个账号拥有一只个人宠物，每个主客户端运行该宠物的 Agent。Agent 负责自主动作、主人互动、好友宠物对话、串门决定和长期记忆；服务端是有状态的通信媒介与模型代理，但不是宠物大脑。
+每个 Account 拥有一个 Pet，并可有多个 Device。服务端是身份、好友授权、养成状态、熟悉度、Visit、信件和事件的事实来源，但不是宠物大脑。标准互动由任意客户端本地立即完成，不依赖 Primary Agent、好友设备在线或模型。
 
 ```text
-Alice 客户端 Agent ── REST/WSS ── PostgreSQL + 模型代理 ── REST/WSS ── Bob 客户端 Agent
-       │                                  │                                  │
-  本地加密记忆                    会话/串门/事件/加密信件                  本地加密记忆
-  桌面坐标与动画                  不保存桌面坐标、不代替离线 Agent          桌面坐标与动画
+┌──────────────── macOS Client ────────────────┐
+│ App / VisitProjection / AccountEventSync     │
+│ Deterministic response + optimistic care     │
+│ Durable outbox, motion and animation         │
+└────────────── HTTPS + WSS ───────────────────┘
+                         │
+┌──────────────── Cloudflare Worker ───────────┐
+│ Hono REST + auth + strict validation         │
+│ Application commands and D1 repositories     │
+│ Optional model proxy (outside base path)     │
+├───────────────────┬──────────────────────────┤
+│ D1                │ AccountRealtimeHub DO    │
+│ durable facts     │ one instance / Account   │
+│ events + receipts │ ready/events_available   │
+└───────────────────┴──────────────────────────┘
 ```
 
-后端是单个 Fastify 进程，PostgreSQL 是唯一服务端事实来源。账号可以拥有多个好友关系，所有跨账号操作都必须显式选择已接受的 `friendshipID`。WebSocket 只降低延迟；客户端始终以 `GET /events?friendshipID=<id>&after=<eventID>` 补齐断线和重启期间的事件。MVP 不使用 Redis、消息队列或微服务。
+不再存在常驻 Node 服务、进程内业务 WebSocket hub、PostgreSQL 或 Redis。Durable Object 不保存业务状态；其丢失、休眠或通知失败只影响延迟。
 
-## Swift 模块依赖
+## Worker 请求路径
+
+```text
+Bearer token
+   │ hash + session/device expiry/revocation check
+   ▼
+AuthContext(accountID, deviceID, petID, isPrimaryAgentDevice)
+   │
+   ├─ strict request schema + 64 KiB body limit
+   ├─ friendship/resource ownership authorization
+   └─ idempotency lookup(account, operation, key, fingerprint)
+          │ miss
+          ▼
+      D1 atomic batch
+      ├─ conditional aggregate transition
+      ├─ recipient A event copy
+      ├─ recipient B event copy
+      └─ idempotency receipt
+          │ commit
+          ▼
+      best-effort notify AccountRealtimeHub for each recipient
+```
+
+业务表用 `version` 与 `last_transition_id` 保护 conditional write。事件与回执使用同一 marker 的 `INSERT … SELECT`，因此竞争失败的 transition 不会留下幽灵事件或成功回执。D1 `account_events.sequence` 是全库单调整数，但客户端只读取 `recipient_account_id = 当前账号` 的独立事件副本。
+
+## Durable Object 实时层
+
+Worker 使用 `ACCOUNT_REALTIME.idFromName(accountID)`，所以一个账号无论有多少设备，都映射到一个 `AccountRealtimeHub`。外部请求不能提交 account/device identity；Worker 在 Bearer 鉴权后移除伪造 header，再向 DO 写入可信 `x-mino-device-id`。
+
+DO 通过 Hibernation API `acceptWebSocket` 接受连接，发送：
+
+- `ready`：连接已由服务端认证并接管；
+- `events_available`：D1 可能存在新事件。
+
+客户端发送业务消息会以 policy violation 关闭。断开的 socket 由 Hibernation API 的集合清理；通知单个 socket 失败不会影响其他设备或业务 commit。
+
+## Swift 模块
 
 ```text
 MinoApp
 ├── MinoAgent ─────────────┐
 ├── MinoRuntime            │
-├── MinoPresentation       ├──> MinoDomain
+├── MinoPresentation       ├── MinoDomain
 ├── MinoInfrastructure ────┤
 ├── MinoPersistence ───────┤
 └── MinoSecurity ──────────┘
 ```
 
-- `MinoDomain`：强类型 ID、命令、访问/对话/信件/事件模型与协议；不导入 UI 或网络实现。
-- `MinoAgent`：串行本地决策队列、上下文裁剪、模型客户端、策略护栏和容量受限的 AES-GCM 记忆。
-- `MinoRuntime`：当前本机可见宠物、坐标、随机移动和显式互动；悬停只暂停环境移动。
-- `MinoPresentation`：桌面窗口、右键菜单、好友页和独立个人事件线。
-- `MinoInfrastructure`：REST 与 WebSocket 实现。DTO 在进入应用协调器前解码为领域模型。
-- `MinoPersistence`：按账号/Profile 隔离的每好友事件游标、个人事件线、快照和 Outbox。
-- `MinoSecurity`：会话 token 与 Agent 记忆密钥的 Keychain 存储。
-- `MinoApp`：`AgentCoordinator`、`ConversationCoordinator`、`VisitCoordinator`、`EventSyncCoordinator` 的唯一组合根。
+- `MinoDomain`：Account、Friendship、Visit、PetCareState、PetFamiliarity、interaction command/receipt、`PetCharacterID`、`PetRigManifest`、`PetMotionClipID`、AccountEvent 与 reducer/projection。
+- `MinoInfrastructure`：Worker REST DTO、token refresh、单账号 WebSocket signal client。
+- `MinoPersistence`：按 Account 保存事件 cursor、个人 timeline、社交 mutation outbox。
+- `MinoApp`：先用 `InteractionResponseProvider` 播放基础反馈，再由 `VisitCoordinator` 通过持久 outbox 发送养成命令；`AccountEventSyncCoordinator` 串行 bootstrap/catch-up/realtime 并静默校正。
+- `MinoRuntime`：只消费 `VisitProjection` 的可见状态和 `PetCharacterID`，不直接调用社交后端；活动移动期间由 display-paced driver 推进世界坐标。
+- `MinoPresentation`：用同一固定画布帧目录向 SpriteKit 桌宠和 SwiftUI 页面提供透明 PNG、帧时序、Reduce Motion 静态帧与统一采样策略。
 
-## 事件与幂等
+## 角色与动作子系统
 
-客户端为每个好友关系维护独立事件游标，先处理并持久化事件带来的 UI/Agent 状态，再推进该关系游标。个人事件线把所有好友事件按发生时间合并。若 Agent 决定产生的消息、应答或 reaction 尚未送达，处理器会抛错并保留旧 cursor，八秒补拉会用同一观察 ID 重试。观察 ID 同时作为模型 `inferenceID` 和后续命令的幂等键，因此不会重复计费或重复产生副作用。
+```text
+PetRuntimeState / interaction result / visit phase
+                         │
+                         ▼
+                PetMotionResolver
+                         │ one semantic clip
+                         ▼
+PetCharacterID ── PetMotionClipID ── PetFrameAnimationCatalog
+                                      │
+                         PetFrameAnimation manifest
+                         frames / timing / loop / static index
+                                      │
+                         ┌────────────┴────────────┐
+                         ▼                         ▼
+                 SpriteKit desktop          PetCharacterView
+                 SKSpriteNode frames         same PNG frames
+```
 
-服务端在一个数据库事务中写业务状态、好友事件与幂等回执。重复 key 且 payload 相同会重放首次结果；不同 payload 复用同一 key 返回冲突。旧数据库中的 `couple_id`/`couple_events` 仅作为内部迁移兼容 scope，不属于领域协议。
+`PetCharacterID` 只包含 `malteseWhite` 与 `retrieverYellow`，wire body 分别为 `maltese-white` 与 `retriever-yellow`。两者共用 `maltese-pair-v1` 的 `120 × 120` 固定画布和 `(60, 102)` 脚底锚点。旧 `AvatarRecipe` 仅在解析已有本地状态时映射角色；它不再决定新界面或桌宠渲染。
 
-## 对话
+帧目录固定为 `Resources/PetFrames/<character.rawValue>/<clip.rawValue>/frame-NNN.png`。`PetFrameAnimationCatalog` 是资源加载和校验的唯一入口，返回有序纹理、单帧时长、循环标记、Reduce Motion 静态帧索引、画布尺寸与脚底锚点。所有 PNG 都必须保留完整透明画布，禁止 trim 或依据 alpha bounds 重新定位。SpriteKit 使用 `.nearest`，SwiftUI 使用无插值采样；两个表面不得各自维护第二套角色素材。
 
-自主社交开启后不需要主人逐句审批。目标宠物必须属于当前已接受好友关系。服务端校验宠物轮次，一段对话最多六条宠物消息，并保证每个好友关系最多只有一段 active 对话；真人加入时消息明确标记为 `human`。客户端重启时会逐好友恢复 active conversation 和消息上下文。最后一轮到达发起方客户端后，还会从服务端补齐有限 transcript，再由发起方本地 Agent 生成摘要并调用结束接口。事件线只保存摘要，不展示完整逐句记录。
+公开网页中的角色位图只能用于视觉核对，禁止下载、裁切、转码后直接进入 `Resources` 或应用包。产品帧只能从授权交付物或经授权方确认的独立制作源导出，并保留可追溯的源图与审批版本。
 
-## 串门
+`PetMotionResolver` 是 `PetActivity`、`PetEmotion`、养成互动/结果、giver/receiver 角色和 Visit 阶段到 `PetMotionClipID` 的唯一映射点。构建测试必须验证两个角色的全部 clip、连续帧号、统一 PNG 尺寸与透明通道、脚底锚点和 Reduce Motion 索引；发布构建不允许以矢量、旧 atlas 或含义不同的动作补洞。
 
-服务端只保存 `pending → active → ended/cancelled` 和逻辑驻留：
+### 单一位移所有权
 
-- 发起前必须校验双方仍是好友；解除或未接受好友关系不能创建串门。
-- 访客主人主动请求登门时，由接待方宠物 Agent 决定。
-- 接待方邀请对方宠物时，由访客宠物 Agent 决定。
-- 接受后，原端隐藏访客，接待端显示访客；客户端重启会先查询 active visit 恢复这一状态。
-- 来访宠物仍由原主人客户端 Agent 驱动。接待端默认让它打盹；原 Agent 通过 reaction 事件证明在线后才恢复活动。
-- 投喂、玩耍、真人消息以及界面上的亲亲、送花、散步都会转成 visit interaction 送回原 Agent；本地动画不冒充远端回应。
-- 原 Agent 离线时，互动保留在事件流中，不由服务端生成替代回应。
-- 自主回家、原主人召回与接待主人请回均使用同一幂等结束接口。
+```text
+worldAnchor             owns screen/world translation only
+├── shadow              fixed to ground anchor
+└── bodyContainer       owns facing mirror only
+    ├── characterSprite fixed 120 × 120 canvas; texture changes only
+    └── effects         clip-local overlays when not baked into a frame
+```
 
-## 信件隐私
+世界运动、帧播放和窗口呈现不能各自叠加位移。`walk` 只推进相同画布内的纹理帧，不能根据每帧 alpha bounds 移动或缩放 sprite。macOS 14 `CADisplayLink` 在移动和交互时以目标 60Hz 推进；到达且没有活动动作后停止，低频 idle 使用独立节拍。最终窗口坐标先按目标屏幕 `backingScaleFactor` 量化到物理像素，再用于比较和设置窗口原点，避免 1x/2x 与多屏切换时反复舍入。
 
-文字信正文只进入信件接口和授权收件界面，不进入好友事件、事件摘要、Agent observation、模型上下文或日志。服务端以 AES-256-GCM 存储，收件人只能在串门结束并交付后读取。事件线保存 `letterID`，用户可再次打开；宠物只知道自己携带/带回了一封密封信。
+Reduce Motion 不建立另一套业务状态机。每个 clip 在自己的帧 manifest 中指定静态帧索引，客户端仍完成到达、互动和离开状态迁移，展示层只切到该静态 PNG 并做透明度变化，不推进序列，也不做走位、弹跳、缩放或旋转。
 
-## 仍属后续范围
+`VisitProjection` 用 aggregate version 去重：active outgoing Visit 隐藏自己的 Pet；active incoming Visit 创建 remote Pet；关闭、好友关闭或 bootstrap 对账会恢复/移除。`pet.care.updated` 不进入事件线，只更新养成投影。旧 `VisitAction` 仅保留协议兼容，不参与新标准互动。
 
-正式身份注册与账号发现、好友解除/拉黑/举报、跨设备 Agent 主设备选举、图片明信片和物品系统、推送唤醒、完整 E2EE、可观测性与水平扩容不属于本轮 MVP。
+## 恢复模型
+
+启动时先获取原子 bootstrap（账号、当前设备、自己的精确养成状态、角色外观、相关熟悉度、好友定性状态、pending/active Visit 和 event cursor），应用完整投影并持久化 cursor；随后从该 cursor REST catch-up。WebSocket 建立后再次 catch-up 关闭握手窗口，并在每个提示后拉取。即使 socket 一直在线但提示丢失，也会周期拉取。
+
+客户端只在事件的 UI/Agent 处理成功后推进 cursor。未知 schema/type 会先推进该事件，随后 bootstrap 对账，避免永久毒事件。网络 mutation 先写本地 outbox，使用稳定 UUID 作为 `Idempotency-Key`，成功后删除。
+
+角色外观采用相同 local-first 流程：bootstrap 若没有 catalog 2 角色或仍是旧 `mino-default`，在 GitHub 登录完成后显示一次性选择；用户确认后立即更新当前 Mac 并把 `PetAppearanceSelectionCommand` 写入持久 outbox。离线重启从 outbox 恢复“稍后同步”。服务端首次提交的角色永久锁定；另一设备选择冲突时返回 `appearance_locked`，客户端重新 bootstrap，以权威角色覆盖乐观结果并说明该角色已在另一设备选定。
+
+详见 [`VisitProtocol.md`](VisitProtocol.md) 与 [`EventSynchronization.md`](EventSynchronization.md)。

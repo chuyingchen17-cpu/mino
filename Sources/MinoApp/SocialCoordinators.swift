@@ -1,167 +1,19 @@
 import Foundation
 import MinoAgent
 import MinoDomain
+import MinoInfrastructure
 
-enum EventSyncStatus: Equatable, Sendable {
-    case stopped
-    case catchingUp
-    case realtime
-    case polling
-}
-
-/// Reconciles durable REST events before consuming best-effort WebSocket pushes.
-/// The cursor advances only after the UI/Agent event handler has run.
-@MainActor
-final class EventSyncCoordinator {
-    typealias EventHandler = @MainActor @Sendable (FriendshipEvent) async throws -> Void
-    typealias StatusHandler = @MainActor @Sendable (EventSyncStatus) -> Void
-
-    private let backend: any MVPBackendService
-    private let realtime: (any FriendshipEventRealtimeService)?
-    private let cursorStore: any FriendshipEventCursorStore
-    private let friendshipID: FriendshipID
-    private let fallbackInterval: Duration
-    private var syncTask: Task<Void, Never>?
-    private var recentlyHandledIDs: [String] = []
-    private var recentlyHandledIDSet = Set<String>()
-
-    init(
-        backend: any MVPBackendService,
-        realtime: (any FriendshipEventRealtimeService)?,
-        cursorStore: any FriendshipEventCursorStore,
-        friendshipID: FriendshipID,
-        fallbackInterval: Duration = .seconds(8)
-    ) {
-        self.backend = backend
-        self.realtime = realtime
-        self.cursorStore = cursorStore
-        self.friendshipID = friendshipID
-        self.fallbackInterval = fallbackInterval
+func shouldRetrySocialMutation(_ error: Error) -> Bool {
+    guard let backend = error as? BackendClientError else {
+        return error is BackendServiceError
     }
-
-    func start(
-        onEvent: @escaping EventHandler,
-        onStatusChange: @escaping StatusHandler = { _ in }
-    ) {
-        stop()
-        syncTask = Task { [weak self] in
-            await self?.run(onEvent: onEvent, onStatusChange: onStatusChange)
-        }
-    }
-
-    func stop() {
-        syncTask?.cancel()
-        syncTask = nil
-    }
-
-    private func run(
-        onEvent: @escaping EventHandler,
-        onStatusChange: @escaping StatusHandler
-    ) async {
-        var cursor: String?
-        do {
-            cursor = try await cursorStore.load(for: friendshipID)
-        } catch {
-            cursor = nil
-        }
-
-        while !Task.isCancelled {
-            onStatusChange(.catchingUp)
-            do {
-                cursor = try await catchUp(
-                    after: cursor,
-                    onEvent: onEvent
-                )
-            } catch {
-                onStatusChange(.polling)
-                guard await pauseForFallback() else { break }
-                continue
-            }
-
-            guard let realtime else {
-                onStatusChange(.polling)
-                guard await pauseForFallback() else { break }
-                continue
-            }
-
-            do {
-                let stream = try await realtime.events(
-                    friendshipID: friendshipID,
-                    after: cursor
-                )
-                onStatusChange(.realtime)
-                for try await event in stream {
-                    guard !Task.isCancelled else { break }
-                    if try await deliver(event, onEvent: onEvent) {
-                        cursor = event.id
-                    }
-                }
-            } catch {
-                // REST catch-up on the next iteration closes any WebSocket gap.
-            }
-
-            guard !Task.isCancelled else { break }
-            onStatusChange(.polling)
-            guard await pauseForFallback() else { break }
-        }
-
-        onStatusChange(.stopped)
-    }
-
-    private func catchUp(
-        after initialCursor: String?,
-        onEvent: @escaping EventHandler
-    ) async throws -> String? {
-        var cursor = initialCursor
-        while !Task.isCancelled {
-            let requestedCursor = cursor
-            let page = try await backend.fetchEvents(
-                friendshipID: friendshipID,
-                after: cursor
-            )
-            let ordered = page.events.sorted { lhs, rhs in
-                if lhs.sequence == rhs.sequence { return lhs.id < rhs.id }
-                return lhs.sequence < rhs.sequence
-            }
-
-            for event in ordered {
-                if try await deliver(event, onEvent: onEvent) {
-                    cursor = event.id
-                }
-            }
-
-            guard !ordered.isEmpty else { break }
-            let pageCursor = page.nextCursor ?? ordered.last?.id
-            guard pageCursor != requestedCursor else { break }
-            cursor = pageCursor
-        }
-        return cursor
-    }
-
-    @discardableResult
-    private func deliver(
-        _ event: FriendshipEvent,
-        onEvent: @escaping EventHandler
-    ) async throws -> Bool {
-        guard !recentlyHandledIDSet.contains(event.id) else { return false }
-        try await onEvent(event)
-        try await cursorStore.save(event.id, for: friendshipID)
-        recentlyHandledIDs.append(event.id)
-        recentlyHandledIDSet.insert(event.id)
-        if recentlyHandledIDs.count > 512 {
-            let expired = recentlyHandledIDs.removeFirst()
-            recentlyHandledIDSet.remove(expired)
-        }
+    switch backend {
+    case .transport, .invalidResponse, .decoding:
         return true
-    }
-
-    private func pauseForFallback() async -> Bool {
-        do {
-            try await Task.sleep(for: fallbackInterval)
-            return !Task.isCancelled
-        } catch {
-            return false
-        }
+    case .invalidRequest:
+        return false
+    case .httpStatus(let statusCode, _):
+        return statusCode == 429 || statusCode >= 500
     }
 }
 
@@ -173,12 +25,17 @@ enum ConversationCoordinationError: Error, Equatable, Sendable {
 }
 
 actor ConversationCoordinator {
-    private let backend: any MVPBackendService
+    private let backend: any AccountBackendService
+    private let outbox: any SocialMutationOutboxStore
     private var conversations: [ConversationID: PetConversation] = [:]
     private var transcripts: [ConversationID: [String]] = [:]
 
-    init(backend: any MVPBackendService) {
+    init(
+        backend: any AccountBackendService,
+        outbox: any SocialMutationOutboxStore
+    ) {
         self.backend = backend
+        self.outbox = outbox
     }
 
     func start(
@@ -187,17 +44,29 @@ actor ConversationCoordinator {
         openingMessage: String,
         idempotencyKey: UUID = UUID()
     ) async throws -> ConversationTurnReceipt {
-        let receipt = try await backend.createConversation(
+        let command = CreateConversationCommand(
             friendshipID: friendshipID,
-            CreateConversationCommand(
-                recipientPetID: recipientPetID,
-                openingMessage: openingMessage,
-                idempotencyKey: idempotencyKey
-            )
+            recipientPetID: recipientPetID,
+            openingMessage: openingMessage,
+            idempotencyKey: idempotencyKey
         )
+        let mutation = SocialMutation(
+            id: idempotencyKey,
+            kind: .createConversation,
+            idempotencyKey: idempotencyKey,
+            body: .object([
+                "friendshipID": .string(friendshipID.rawValue),
+                "recipientPetID": .string(recipientPetID.rawValue),
+                "openingMessage": .string(openingMessage),
+                "actorType": .string(SocialActorType.petAgent.rawValue)
+            ])
+        )
+        let receipt = try await deliver(mutation) {
+            try await backend.createConversation(command)
+        }
         conversations[receipt.conversation.id] = receipt.conversation
         appendTranscript(
-            "pet:\(receipt.message.actorID): \(receipt.message.text)",
+            "pet_agent:\(receipt.message.senderAccountID.rawValue): \(receipt.message.body)",
             to: receipt.conversation.id
         )
         return receipt
@@ -223,18 +92,23 @@ actor ConversationCoordinator {
             }
         }
 
-        let receipt = try await backend.sendConversationMessage(
-            friendshipID: try friendshipID(for: conversationID),
-            conversationID: conversationID,
-            command: SendConversationMessageCommand(
-                actorType: .pet,
-                text: text,
-                idempotencyKey: idempotencyKey
-            )
+        let command = SendConversationMessageCommand(
+            actorType: .petAgent,
+            text: text,
+            idempotencyKey: idempotencyKey
         )
+        let receipt = try await deliver(messageMutation(
+            conversationID: conversationID,
+            command: command
+        )) {
+            try await backend.sendConversationMessage(
+                conversationID: conversationID,
+                command: command
+            )
+        }
         conversations[conversationID] = receipt.conversation
         appendTranscript(
-            "pet:\(receipt.message.actorID): \(receipt.message.text)",
+            "pet_agent:\(receipt.message.senderAccountID.rawValue): \(receipt.message.body)",
             to: conversationID
         )
         return receipt
@@ -248,18 +122,23 @@ actor ConversationCoordinator {
         if conversations[conversationID]?.status == .ended {
             throw ConversationCoordinationError.conversationEnded
         }
-        let receipt = try await backend.sendConversationMessage(
-            friendshipID: try friendshipID(for: conversationID),
-            conversationID: conversationID,
-            command: SendConversationMessageCommand(
-                actorType: .human,
-                text: text,
-                idempotencyKey: idempotencyKey
-            )
+        let command = SendConversationMessageCommand(
+            actorType: .human,
+            text: text,
+            idempotencyKey: idempotencyKey
         )
+        let receipt = try await deliver(messageMutation(
+            conversationID: conversationID,
+            command: command
+        )) {
+            try await backend.sendConversationMessage(
+                conversationID: conversationID,
+                command: command
+            )
+        }
         conversations[conversationID] = receipt.conversation
         appendTranscript(
-            "human:\(receipt.message.actorID): \(receipt.message.text)",
+            "human:\(receipt.message.senderAccountID.rawValue): \(receipt.message.body)",
             to: conversationID
         )
         return receipt
@@ -270,14 +149,26 @@ actor ConversationCoordinator {
         summary: String,
         idempotencyKey: UUID = UUID()
     ) async throws -> PetConversation {
-        let conversation = try await backend.endConversation(
-            friendshipID: try friendshipID(for: conversationID),
-            conversationID: conversationID,
-            command: EndConversationCommand(
-                summary: summary,
-                idempotencyKey: idempotencyKey
-            )
+        let command = EndConversationCommand(
+            summary: summary,
+            idempotencyKey: idempotencyKey
         )
+        let mutation = SocialMutation(
+            id: idempotencyKey,
+            kind: .endConversation,
+            aggregateID: conversationID.rawValue,
+            idempotencyKey: idempotencyKey,
+            body: .object([
+                "summary": .string(summary),
+                "actorType": .string(SocialActorType.petAgent.rawValue)
+            ])
+        )
+        let conversation = try await deliver(mutation) {
+            try await backend.endConversation(
+                conversationID: conversationID,
+                command: command
+            )
+        }
         conversations[conversation.id] = conversation
         return conversation
     }
@@ -297,7 +188,7 @@ actor ConversationCoordinator {
             return $0.createdAt < $1.createdAt
         }) {
             appendTranscript(
-                "\(message.actorType.rawValue):\(message.actorID): \(message.text)",
+                "\(message.actorType.rawValue):\(message.senderAccountID.rawValue): \(message.body)",
                 to: conversation.id
             )
         }
@@ -316,7 +207,7 @@ actor ConversationCoordinator {
             to: conversationID
         )
         guard
-            actorType == .pet,
+            actorType == .petAgent,
             let turnIndex,
             let current = conversations[conversationID]
         else { return }
@@ -329,6 +220,7 @@ actor ConversationCoordinator {
             status: nextTurnCount >= 6 ? .ended : .active,
             nextSpeakerPetID: nextTurnCount >= 6 ? nil : recipientPetID,
             turnCount: nextTurnCount,
+            version: current.version + 1,
             createdAt: current.createdAt,
             endedAt: nextTurnCount >= 6 ? Date() : current.endedAt
         )
@@ -340,7 +232,6 @@ actor ConversationCoordinator {
 
     func completeTranscript(for conversationID: ConversationID) async throws -> [String] {
         let messages = try await backend.fetchConversationMessages(
-            friendshipID: try friendshipID(for: conversationID),
             conversationID: conversationID
         )
         if let conversation = conversations[conversationID] {
@@ -349,19 +240,12 @@ actor ConversationCoordinator {
             transcripts[conversationID] = []
             for message in messages {
                 appendTranscript(
-                    "\(message.actorType.rawValue):\(message.actorID): \(message.text)",
+                    "\(message.actorType.rawValue):\(message.senderAccountID.rawValue): \(message.body)",
                     to: conversationID
                 )
             }
         }
         return transcripts[conversationID] ?? []
-    }
-
-    private func friendshipID(for conversationID: ConversationID) throws -> FriendshipID {
-        guard let friendshipID = conversations[conversationID]?.friendshipID else {
-            throw ConversationCoordinationError.conversationNotFound
-        }
-        return friendshipID
     }
 
     private func appendTranscript(_ line: String, to conversationID: ConversationID) {
@@ -372,19 +256,63 @@ actor ConversationCoordinator {
         }
         transcripts[conversationID] = values
     }
+
+    private func messageMutation(
+        conversationID: ConversationID,
+        command: SendConversationMessageCommand
+    ) -> SocialMutation {
+        SocialMutation(
+            id: command.idempotencyKey,
+            kind: .sendConversationMessage,
+            aggregateID: conversationID.rawValue,
+            idempotencyKey: command.idempotencyKey,
+            body: .object([
+                "actorType": .string(command.actorType.rawValue),
+                "text": .string(command.text)
+            ])
+        )
+    }
+
+    private func deliver<Value: Sendable>(
+        _ mutation: SocialMutation,
+        operation: () async throws -> Value
+    ) async throws -> Value {
+        try await outbox.enqueue(mutation)
+        do {
+            let value = try await operation()
+            try await outbox.markSucceeded(mutation.id)
+            return value
+        } catch {
+            if shouldRetrySocialMutation(error) {
+                try? await outbox.markFailed(
+                    mutation.id,
+                    retryAt: Date().addingTimeInterval(2)
+                )
+            } else {
+                try? await outbox.markSucceeded(mutation.id)
+            }
+            throw error
+        }
+    }
 }
 
-enum VisitCoordinationMVPError: Error, Equatable, Sendable {
+enum VisitCoordinationError: Error, Equatable, Sendable {
     case visitNotActive
     case emptyLetter
+    case invalidOutboxMutation
 }
 
 actor VisitCoordinator {
-    private let backend: any MVPBackendService
-    private var visits: [PetVisitID: MVPVisit] = [:]
+    private let backend: any AccountBackendService
+    private let outbox: any SocialMutationOutboxStore
+    private var visits: [PetVisitID: Visit] = [:]
 
-    init(backend: any MVPBackendService) {
+    init(
+        backend: any AccountBackendService,
+        outbox: any SocialMutationOutboxStore
+    ) {
         self.backend = backend
+        self.outbox = outbox
     }
 
     func invite(
@@ -393,72 +321,165 @@ actor VisitCoordinator {
         hostAccountID: AccountID,
         reason: String?,
         idempotencyKey: UUID = UUID()
-    ) async throws -> MVPVisit {
-        let visit = try await backend.createVisitInvitation(
-            friendshipID: friendshipID,
-            CreateVisitInvitationCommand(
-                visitorPetID: visitorPetID,
-                hostAccountID: hostAccountID,
-                reason: reason,
-                idempotencyKey: idempotencyKey
-            )
+    ) async throws -> Visit {
+        var body: [String: JSONValue] = [
+            "friendshipID": .string(friendshipID.rawValue),
+            "visitorPetID": .string(visitorPetID.rawValue),
+            "hostAccountID": .string(hostAccountID.rawValue)
+        ]
+        if let reason { body["reason"] = .string(reason) }
+        let mutation = SocialMutation(
+            id: idempotencyKey,
+            kind: .createVisit,
+            idempotencyKey: idempotencyKey,
+            body: .object(body)
         )
+        let visit = try await deliver(mutation) {
+            try await backend.createVisit(
+                CreateVisitCommand(
+                    friendshipID: friendshipID,
+                    visitorPetID: visitorPetID,
+                    hostAccountID: hostAccountID,
+                    reason: reason,
+                    idempotencyKey: idempotencyKey
+                )
+            )
+        }
         visits[visit.id] = visit
         return visit
     }
 
     func respond(
         visitID: PetVisitID,
-        response: PetVisitInvitationResponse,
+        response: VisitResponse,
+        actorType: VisitActionActorType = .petAgent,
         idempotencyKey: UUID = UUID()
-    ) async throws -> MVPVisit {
-        let friendshipID = try requireVisit(visitID).friendshipID
-        let visit = try await backend.respondToVisitInvitation(
-            friendshipID: friendshipID,
-            visitID: visitID,
-            command: RespondToVisitInvitationCommand(
-                response: response,
-                idempotencyKey: idempotencyKey
-            )
+    ) async throws -> Visit {
+        _ = try requireVisit(visitID)
+        let mutation = SocialMutation(
+            id: idempotencyKey,
+            kind: .respondVisit,
+            aggregateID: visitID.rawValue,
+            idempotencyKey: idempotencyKey,
+            body: .object([
+                "response": .string(response.rawValue),
+                "actorType": .string(actorType.rawValue)
+            ])
         )
+        let visit = try await deliver(mutation) {
+            try await backend.respondToVisit(
+                visitID: visitID,
+                command: RespondToVisitCommand(
+                    response: response,
+                    actorType: actorType,
+                    idempotencyKey: idempotencyKey
+                )
+            )
+        }
         visits[visit.id] = visit
         return visit
     }
 
     func interact(
         visitID: PetVisitID,
-        kind: VisitInteractionKind,
+        kind: VisitActionKind,
         text: String? = nil,
         idempotencyKey: UUID = UUID()
-    ) async throws -> VisitInteractionReceipt {
-        let visit = try requireActiveVisit(visitID)
-        return try await backend.sendVisitInteraction(
-            friendshipID: visit.friendshipID,
-            visitID: visitID,
-            command: CreateVisitInteractionCommand(
-                kind: kind,
-                text: text,
-                idempotencyKey: idempotencyKey
-            )
+    ) async throws -> VisitAction {
+        _ = try requireActiveVisit(visitID)
+        let payload: JSONValue = switch kind {
+        case .message: .object(["text": .string(text ?? "")])
+        case .walk: .object(text.map { ["destination": .string($0)] } ?? [:])
+        default: .object([:])
+        }
+        let command = CreateVisitActionCommand(
+            kind: kind,
+            actorType: .human,
+            payload: payload,
+            idempotencyKey: idempotencyKey
         )
+        return try await deliver(actionMutation(visitID: visitID, command: command)) {
+            try await backend.createVisitAction(visitID: visitID, command: command)
+        }
+    }
+
+    func interactWithPet(
+        petID: PetProfileID,
+        kind: PetCareInteractionKind,
+        visitID: PetVisitID? = nil,
+        occurredAt: Date = Date(),
+        idempotencyKey: UUID = UUID()
+    ) async throws -> PetInteractionReceipt {
+        if let visitID { _ = try requireActiveVisit(visitID) }
+        var body: [String: JSONValue] = [
+            "petID": .string(petID.rawValue),
+            "kind": .string(kind.rawValue),
+            "occurredAt": .number(occurredAt.timeIntervalSince1970 * 1_000)
+        ]
+        if let visitID { body["visitID"] = .string(visitID.rawValue) }
+        let mutation = SocialMutation(
+            id: idempotencyKey,
+            kind: .petInteraction,
+            aggregateID: petID.rawValue,
+            idempotencyKey: idempotencyKey,
+            body: .object(body)
+        )
+        return try await deliver(mutation) {
+            try await backend.interactWithPet(
+                petID: petID,
+                command: PetInteractionCommand(
+                    kind: kind,
+                    visitID: visitID,
+                    occurredAt: occurredAt,
+                    idempotencyKey: idempotencyKey
+                )
+            )
+        }
+    }
+
+    func updateOwnPetAppearance(
+        characterID: PetCharacterID,
+        idempotencyKey: UUID = UUID()
+    ) async throws -> PublicPetSnapshot {
+        let command = PetAppearanceSelectionCommand(
+            characterID: characterID,
+            idempotencyKey: idempotencyKey
+        )
+        let mutation = SocialMutation(
+            id: idempotencyKey,
+            kind: .petAppearanceSelection,
+            aggregateID: nil,
+            idempotencyKey: idempotencyKey,
+            body: .object([
+                "appearanceSchemaVersion": .number(Double(command.appearanceSchemaVersion)),
+                "appearanceCatalogVersion": .number(Double(command.appearanceCatalogVersion)),
+                "appearance": .object(command.appearance.mapValues(JSONValue.string))
+            ])
+        )
+        return try await deliver(mutation) {
+            try await backend.updateOwnPetAppearance(command)
+        }
     }
 
     func react(
         visitID: PetVisitID,
-        reaction: VisitPetReaction,
+        reaction: PetReaction,
         text: String? = nil,
         idempotencyKey: UUID = UUID()
-    ) async throws -> VisitReactionReceipt {
-        let visit = try requireActiveVisit(visitID)
-        return try await backend.sendVisitReaction(
-            friendshipID: visit.friendshipID,
-            visitID: visitID,
-            command: CreateVisitReactionCommand(
-                reaction: reaction,
-                text: text,
-                idempotencyKey: idempotencyKey
-            )
+    ) async throws -> VisitAction {
+        _ = try requireActiveVisit(visitID)
+        var payload: [String: JSONValue] = ["reaction": .string(reaction.rawValue)]
+        if let text { payload["text"] = .string(text) }
+        let command = CreateVisitActionCommand(
+            kind: .reaction,
+            actorType: .petAgent,
+            payload: .object(payload),
+            replyToActionID: idempotencyKey,
+            idempotencyKey: idempotencyKey
         )
+        return try await deliver(actionMutation(visitID: visitID, command: command)) {
+            try await backend.createVisitAction(visitID: visitID, command: command)
+        }
     }
 
     /// Letter bodies go directly to the letter endpoint and are never exposed to
@@ -468,56 +489,268 @@ actor VisitCoordinator {
         body: String,
         idempotencyKey: UUID = UUID()
     ) async throws -> PetLetter {
-        let visit = try requireActiveVisit(visitID)
+        _ = try requireActiveVisit(visitID)
         let normalized = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { throw VisitCoordinationMVPError.emptyLetter }
-        return try await backend.createLetter(
-            friendshipID: visit.friendshipID,
-            visitID: visitID,
-            command: CreateLetterCommand(body: normalized, idempotencyKey: idempotencyKey)
+        guard !normalized.isEmpty else { throw VisitCoordinationError.emptyLetter }
+        let mutation = SocialMutation(
+            id: idempotencyKey,
+            kind: .createLetter,
+            aggregateID: visitID.rawValue,
+            idempotencyKey: idempotencyKey,
+            body: .object(["body": .string(normalized)])
         )
+        return try await deliver(mutation) {
+            try await backend.createLetter(
+                visitID: visitID,
+                command: CreateLetterCommand(body: normalized, idempotencyKey: idempotencyKey)
+            )
+        }
     }
 
     func fetchLetter(
-        friendshipID: FriendshipID,
+        friendshipID _: FriendshipID,
         _ letterID: LetterID
     ) async throws -> PetLetter {
-        try await backend.fetchLetter(friendshipID: friendshipID, letterID)
+        try await backend.fetchLetter(letterID)
     }
 
     func end(
         visitID: PetVisitID,
+        actorType: VisitActionActorType = .human,
         idempotencyKey: UUID = UUID()
-    ) async throws -> EndVisitReceipt {
-        let visit = try requireActiveVisit(visitID)
-        let receipt = try await backend.endVisit(
-            friendshipID: visit.friendshipID,
-            visitID: visitID,
-            command: EndVisitCommand(idempotencyKey: idempotencyKey)
+    ) async throws -> Visit {
+        _ = try requireVisit(visitID)
+        let mutation = SocialMutation(
+            id: idempotencyKey,
+            kind: .endVisit,
+            aggregateID: visitID.rawValue,
+            idempotencyKey: idempotencyKey,
+            body: .object(["actorType": .string(actorType.rawValue)])
         )
-        visits[receipt.visit.id] = receipt.visit
-        return receipt
+        let visit = try await deliver(mutation) {
+            try await backend.endVisit(
+                visitID: visitID,
+                command: EndVisitCommand(actorType: actorType, idempotencyKey: idempotencyKey)
+            )
+        }
+        visits[visit.id] = visit
+        return visit
     }
 
-    func apply(_ visit: MVPVisit) {
+    func apply(_ visit: Visit) {
         visits[visit.id] = visit
     }
 
-    func visit(id: PetVisitID) -> MVPVisit? {
+    func visit(id: PetVisitID) -> Visit? {
         visits[id]
     }
 
-    private func requireVisit(_ id: PetVisitID) throws -> MVPVisit {
+    func retryPendingMutations(now: Date = Date()) async {
+        guard let pending = try? await outbox.due(at: now) else { return }
+        for mutation in pending {
+            do {
+                try await retry(mutation)
+                try await outbox.markSucceeded(mutation.id)
+            } catch {
+                guard shouldRetrySocialMutation(error) else {
+                    try? await outbox.markSucceeded(mutation.id)
+                    continue
+                }
+                let exponent = min(mutation.attemptCount, 7)
+                let delay = min(300, pow(2, Double(exponent + 1)))
+                try? await outbox.markFailed(
+                    mutation.id,
+                    retryAt: now.addingTimeInterval(delay)
+                )
+            }
+        }
+    }
+
+    private func retry(_ mutation: SocialMutation) async throws {
+        let key = mutation.idempotencyKey
+        switch mutation.kind {
+        case .createVisit:
+            guard let friendshipID = mutation.body["friendshipID"]?.stringValue,
+                  let visitorPetID = mutation.body["visitorPetID"]?.stringValue,
+                  let hostAccountID = mutation.body["hostAccountID"]?.stringValue
+            else { throw VisitCoordinationError.invalidOutboxMutation }
+            _ = try await backend.createVisit(
+                CreateVisitCommand(
+                    friendshipID: FriendshipID(rawValue: friendshipID),
+                    visitorPetID: PetProfileID(rawValue: visitorPetID),
+                    hostAccountID: AccountID(rawValue: hostAccountID),
+                    reason: mutation.body["reason"]?.stringValue,
+                    idempotencyKey: key
+                )
+            )
+        case .respondVisit:
+            guard let visitID = mutation.aggregateID,
+                  let response = mutation.body["response"]?.stringValue.flatMap(VisitResponse.init(rawValue:)),
+                  let actor = mutation.body["actorType"]?.stringValue.flatMap(VisitActionActorType.init(rawValue:))
+            else { throw VisitCoordinationError.invalidOutboxMutation }
+            _ = try await backend.respondToVisit(
+                visitID: PetVisitID(rawValue: visitID),
+                command: RespondToVisitCommand(response: response, actorType: actor, idempotencyKey: key)
+            )
+        case .createVisitAction:
+            guard let visitID = mutation.aggregateID,
+                  let kind = mutation.body["kind"]?.stringValue.flatMap(VisitActionKind.init(rawValue:)),
+                  let actor = mutation.body["actorType"]?.stringValue.flatMap(VisitActionActorType.init(rawValue:)),
+                  let payload = mutation.body["payload"]
+            else { throw VisitCoordinationError.invalidOutboxMutation }
+            let replyID = mutation.body["replyToActionID"]?.stringValue.flatMap(UUID.init(uuidString:))
+            _ = try await backend.createVisitAction(
+                visitID: PetVisitID(rawValue: visitID),
+                command: CreateVisitActionCommand(
+                    kind: kind,
+                    actorType: actor,
+                    payload: payload,
+                    replyToActionID: replyID,
+                    idempotencyKey: key
+                )
+            )
+        case .endVisit:
+            guard let visitID = mutation.aggregateID,
+                  let actor = mutation.body["actorType"]?.stringValue.flatMap(VisitActionActorType.init(rawValue:))
+            else { throw VisitCoordinationError.invalidOutboxMutation }
+            _ = try await backend.endVisit(
+                visitID: PetVisitID(rawValue: visitID),
+                command: EndVisitCommand(actorType: actor, idempotencyKey: key)
+            )
+        case .createLetter:
+            guard let visitID = mutation.aggregateID,
+                  let body = mutation.body["body"]?.stringValue
+            else { throw VisitCoordinationError.invalidOutboxMutation }
+            _ = try await backend.createLetter(
+                visitID: PetVisitID(rawValue: visitID),
+                command: CreateLetterCommand(body: body, idempotencyKey: key)
+            )
+        case .createConversation:
+            guard let friendshipID = mutation.body["friendshipID"]?.stringValue,
+                  let recipientPetID = mutation.body["recipientPetID"]?.stringValue,
+                  let openingMessage = mutation.body["openingMessage"]?.stringValue
+            else { throw VisitCoordinationError.invalidOutboxMutation }
+            _ = try await backend.createConversation(
+                CreateConversationCommand(
+                    friendshipID: FriendshipID(rawValue: friendshipID),
+                    recipientPetID: PetProfileID(rawValue: recipientPetID),
+                    openingMessage: openingMessage,
+                    idempotencyKey: key
+                )
+            )
+        case .sendConversationMessage:
+            guard let conversationID = mutation.aggregateID,
+                  let actor = mutation.body["actorType"]?.stringValue.flatMap(SocialActorType.init(rawValue:)),
+                  let text = mutation.body["text"]?.stringValue
+            else { throw VisitCoordinationError.invalidOutboxMutation }
+            _ = try await backend.sendConversationMessage(
+                conversationID: ConversationID(rawValue: conversationID),
+                command: SendConversationMessageCommand(
+                    actorType: actor,
+                    text: text,
+                    idempotencyKey: key
+                )
+            )
+        case .endConversation:
+            guard let conversationID = mutation.aggregateID,
+                  let summary = mutation.body["summary"]?.stringValue
+            else { throw VisitCoordinationError.invalidOutboxMutation }
+            _ = try await backend.endConversation(
+                conversationID: ConversationID(rawValue: conversationID),
+                command: EndConversationCommand(summary: summary, idempotencyKey: key)
+            )
+        case .petInteraction:
+            guard let petID = mutation.body["petID"]?.stringValue,
+                  let kind = mutation.body["kind"]?.stringValue.flatMap(
+                    PetCareInteractionKind.init(rawValue:)
+                  ),
+                  let occurredAt = mutation.body["occurredAt"]?.numberValue
+            else { throw VisitCoordinationError.invalidOutboxMutation }
+            _ = try await backend.interactWithPet(
+                petID: PetProfileID(rawValue: petID),
+                command: PetInteractionCommand(
+                    kind: kind,
+                    visitID: mutation.body["visitID"]?.stringValue.map(
+                        PetVisitID.init(rawValue:)
+                    ),
+                    occurredAt: Date(timeIntervalSince1970: occurredAt / 1_000),
+                    idempotencyKey: key
+                )
+            )
+        case .petAppearanceSelection:
+            guard
+                let schema = mutation.body["appearanceSchemaVersion"]?.numberValue,
+                let catalog = mutation.body["appearanceCatalogVersion"]?.numberValue,
+                Int(schema) == PetCharacterID.appearanceSchema,
+                Int(catalog) == PetCharacterID.appearanceCatalog,
+                case .object(let appearance)? = mutation.body["appearance"],
+                let rigID = appearance["rigID"]?.stringValue,
+                let body = appearance["body"]?.stringValue,
+                let characterID = PetCharacterID(appearance: ["rigID": rigID, "body": body])
+            else { throw VisitCoordinationError.invalidOutboxMutation }
+            _ = try await backend.updateOwnPetAppearance(
+                PetAppearanceSelectionCommand(
+                    characterID: characterID,
+                    idempotencyKey: key
+                )
+            )
+        }
+    }
+
+    private func actionMutation(
+        visitID: PetVisitID,
+        command: CreateVisitActionCommand
+    ) -> SocialMutation {
+        var body: [String: JSONValue] = [
+            "kind": .string(command.kind.rawValue),
+            "actorType": .string(command.actorType.rawValue),
+            "payload": command.payload
+        ]
+        if let reply = command.replyToActionID {
+            body["replyToActionID"] = .string(reply.uuidString)
+        }
+        return SocialMutation(
+            id: command.idempotencyKey,
+            kind: .createVisitAction,
+            aggregateID: visitID.rawValue,
+            idempotencyKey: command.idempotencyKey,
+            body: .object(body)
+        )
+    }
+
+    private func deliver<Value: Sendable>(
+        _ mutation: SocialMutation,
+        operation: () async throws -> Value
+    ) async throws -> Value {
+        try await outbox.enqueue(mutation)
+        do {
+            let value = try await operation()
+            try await outbox.markSucceeded(mutation.id)
+            return value
+        } catch {
+            if shouldRetrySocialMutation(error) {
+                try? await outbox.markFailed(
+                    mutation.id,
+                    retryAt: Date().addingTimeInterval(2)
+                )
+            } else {
+                try? await outbox.markSucceeded(mutation.id)
+            }
+            throw error
+        }
+    }
+
+    private func requireVisit(_ id: PetVisitID) throws -> Visit {
         guard let visit = visits[id] else {
-            throw VisitCoordinationMVPError.visitNotActive
+            throw VisitCoordinationError.visitNotActive
         }
         return visit
     }
 
-    private func requireActiveVisit(_ id: PetVisitID) throws -> MVPVisit {
+    private func requireActiveVisit(_ id: PetVisitID) throws -> Visit {
         let visit = try requireVisit(id)
         guard visit.status == .active else {
-            throw VisitCoordinationMVPError.visitNotActive
+            throw VisitCoordinationError.visitNotActive
         }
         return visit
     }
@@ -576,6 +809,25 @@ actor AgentCoordinator {
             localeIdentifier: identity.localeIdentifier
         )
         await agent.updateFriends(friends)
+    }
+
+    func updateDisplayName(_ displayName: String) async {
+        identity = AgentIdentity(
+            petID: identity.petID,
+            ownerAccountID: identity.ownerAccountID,
+            displayName: displayName,
+            friends: identity.friends,
+            localeIdentifier: identity.localeIdentifier
+        )
+        await agent.updateDisplayName(displayName)
+    }
+
+    func hasFriends() -> Bool {
+        !identity.friends.isEmpty
+    }
+
+    func snapshot() async -> LocalPetAgentSnapshot {
+        await agent.snapshot()
     }
 
     /// Processes a durable server event. Delivery failures are rethrown so the
@@ -688,7 +940,7 @@ actor AgentCoordinator {
         return true
     }
 
-    func applyVisit(_ visit: MVPVisit) async {
+    func applyVisit(_ visit: Visit) async {
         await visits.apply(visit)
         guard visit.visitorPetID == identity.petID else { return }
         let location: PetLogicalLocation =
@@ -765,7 +1017,7 @@ actor AgentCoordinator {
             if case .visiting(let visitID) = state.location {
                 _ = try await visits.react(
                     visitID: visitID,
-                    reaction: VisitPetReaction(reaction),
+                    reaction: reaction,
                     idempotencyKey: idempotencyKey
                 )
             } else {
@@ -775,23 +1027,10 @@ actor AgentCoordinator {
         case .requestReturn(let visitID):
             _ = try await visits.end(
                 visitID: visitID,
+                actorType: .petAgent,
                 idempotencyKey: idempotencyKey
             )
         }
     }
 
-}
-
-private extension VisitPetReaction {
-    init(_ reaction: PetReaction) {
-        self = switch reaction {
-        case .happy: .happy
-        case .excited: .excited
-        case .shy: .shy
-        case .sleepy: .sleepy
-        case .grateful: .grateful
-        case .playful: .playful
-        case .resting: .resting
-        }
-    }
 }

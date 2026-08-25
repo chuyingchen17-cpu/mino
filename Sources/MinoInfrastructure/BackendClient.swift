@@ -7,10 +7,7 @@ public protocol AccessTokenProvider: Sendable {
 
 public struct AnonymousAccessTokenProvider: AccessTokenProvider {
     public init() {}
-
-    public func accessToken() async throws -> String? {
-        nil
-    }
+    public func accessToken() async throws -> String? { nil }
 }
 
 public enum BackendClientError: Error, Equatable, Sendable {
@@ -21,190 +18,46 @@ public enum BackendClientError: Error, Equatable, Sendable {
     case transport(String)
 }
 
-public struct OfflineBackendService: MVPBackendService {
+public struct OfflineBackendService: AccountBackendService {
     private let apiVersion: String
-
-    public init(apiVersion: String = "v1") {
-        self.apiVersion = apiVersion
-    }
+    public init(apiVersion: String = "v1") { self.apiVersion = apiVersion }
 
     public func checkHealth() async throws -> BackendHealth {
         BackendHealth(status: .offline, apiVersion: apiVersion)
     }
-
-    public func sendInteraction(_ command: InteractionCommand) async throws -> InteractionReceipt {
-        throw BackendServiceError.offline
-    }
-
-    public func fetchPetPresence() async throws -> PetPresenceSnapshot {
-        throw BackendServiceError.offline
-    }
-
-    public func startPetVisit(_ command: StartPetVisitCommand) async throws -> PetVisitReceipt {
-        throw BackendServiceError.offline
-    }
-
-    public func returnPetVisit(_ command: ReturnPetVisitCommand) async throws -> PetVisitReceipt {
-        throw BackendServiceError.offline
-    }
-
-    public func sendPetVisitInvitation(
-        _ command: SendPetVisitInvitationCommand
-    ) async throws -> PetVisitInvitation {
-        throw BackendServiceError.offline
-    }
-
-    public func fetchPendingPetVisitInvitations() async throws -> [PetVisitInvitation] {
-        throw BackendServiceError.offline
-    }
-
-    public func respondToPetVisitInvitation(
-        _ command: RespondToPetVisitInvitationCommand
-    ) async throws -> PetVisitInvitationReceipt {
-        throw BackendServiceError.offline
-    }
-
-    public func fetchPersonalTimeline(after cursor: String?) async throws -> PersonalTimelinePage {
-        throw BackendServiceError.offline
-    }
-
-    public func bootstrapDevelopmentProfile(_ profile: String) async throws -> DevBootstrapProfile {
-        throw BackendServiceError.offline
-    }
-
-    public func fetchFriends() async throws -> [FriendProfile] {
-        throw BackendServiceError.offline
-    }
-
-    public func fetchFriendRequests(status: FriendRequestStatus?) async throws -> [FriendRequest] {
-        throw BackendServiceError.offline
-    }
-
-    public func createFriendRequest(_ command: CreateFriendRequestCommand) async throws -> FriendRequest {
-        throw BackendServiceError.offline
-    }
-
-    public func respondToFriendRequest(
-        requestID: FriendRequestID,
-        command: RespondFriendRequestCommand
-    ) async throws -> FriendRequest {
-        throw BackendServiceError.offline
-    }
-
-    public func fetchEvents(
-        friendshipID: FriendshipID,
-        after eventID: String?
-    ) async throws -> FriendshipEventPage {
-        throw BackendServiceError.offline
-    }
-
-    public func fetchTimelineEvents(
-        friendshipID: FriendshipID,
-        after eventID: String?
-    ) async throws -> FriendshipEventPage {
-        throw BackendServiceError.offline
-    }
-
-    public func createConversation(
-        friendshipID: FriendshipID,
-        _ command: CreateConversationCommand
-    ) async throws -> ConversationTurnReceipt {
-        throw BackendServiceError.offline
-    }
-
-    public func fetchConversations(
-        friendshipID: FriendshipID,
-        status: ConversationStatus?
-    ) async throws -> [PetConversation] {
-        throw BackendServiceError.offline
-    }
-
-    public func fetchConversationMessages(
-        friendshipID: FriendshipID,
-        conversationID: ConversationID
-    ) async throws -> [PetConversationMessage] {
-        throw BackendServiceError.offline
-    }
-
-    public func sendConversationMessage(
-        friendshipID: FriendshipID,
-        conversationID: ConversationID,
-        command: SendConversationMessageCommand
-    ) async throws -> ConversationTurnReceipt {
-        throw BackendServiceError.offline
-    }
-
-    public func endConversation(
-        friendshipID: FriendshipID,
-        conversationID: ConversationID,
-        command: EndConversationCommand
-    ) async throws -> PetConversation {
-        throw BackendServiceError.offline
-    }
-
-    public func createVisitInvitation(
-        friendshipID: FriendshipID,
-        _ command: CreateVisitInvitationCommand
-    ) async throws -> MVPVisit {
-        throw BackendServiceError.offline
-    }
-
-    public func fetchVisitInvitations(
-        friendshipID: FriendshipID,
-        status: MVPVisitStatus?
-    ) async throws -> [MVPVisit] {
-        throw BackendServiceError.offline
-    }
-
-    public func respondToVisitInvitation(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: RespondToVisitInvitationCommand
-    ) async throws -> MVPVisit {
-        throw BackendServiceError.offline
-    }
-
-    public func sendVisitInteraction(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: CreateVisitInteractionCommand
-    ) async throws -> VisitInteractionReceipt {
-        throw BackendServiceError.offline
-    }
-
-    public func sendVisitReaction(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: CreateVisitReactionCommand
-    ) async throws -> VisitReactionReceipt {
-        throw BackendServiceError.offline
-    }
-
-    public func createLetter(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: CreateLetterCommand
-    ) async throws -> PetLetter {
-        throw BackendServiceError.offline
-    }
-
-    public func fetchLetter(
-        friendshipID: FriendshipID,
-        _ letterID: LetterID
-    ) async throws -> PetLetter {
-        throw BackendServiceError.offline
-    }
-
-    public func endVisit(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: EndVisitCommand
-    ) async throws -> EndVisitReceipt {
-        throw BackendServiceError.offline
-    }
+    public func startGitHubDeviceAuthorization() async throws -> GitHubDeviceAuthorization { throw BackendServiceError.offline }
+    public func completeGitHubDeviceAuthorization(deviceCode: String, device: DeviceMetadata) async throws -> GitHubDeviceCompletion { throw BackendServiceError.offline }
+    public func refreshSession(_ refreshToken: String) async throws -> AccountSession { throw BackendServiceError.offline }
+    public func logout() async throws { throw BackendServiceError.offline }
+    public func bootstrapDevelopmentProfile(_ profile: String) async throws -> DevBootstrapProfile { throw BackendServiceError.offline }
+    public func fetchCurrentProfile() async throws -> CurrentProfile { throw BackendServiceError.offline }
+    public func updateCurrentProfile(accountName: String, petName: String) async throws -> CurrentProfile { throw BackendServiceError.offline }
+    public func updateOwnPetAppearance(_ command: PetAppearanceSelectionCommand) async throws -> PublicPetSnapshot { throw BackendServiceError.offline }
+    public func fetchOwnPetCare() async throws -> PetCareState { throw BackendServiceError.offline }
+    public func interactWithPet(petID: PetProfileID, command: PetInteractionCommand) async throws -> PetInteractionReceipt { throw BackendServiceError.offline }
+    public func fetchFriends() async throws -> [FriendProfile] { throw BackendServiceError.offline }
+    public func fetchFriendRequests(status: FriendRequestStatus?) async throws -> [FriendRequest] { throw BackendServiceError.offline }
+    public func createFriendRequest(_ command: CreateFriendRequestCommand) async throws -> FriendRequest { throw BackendServiceError.offline }
+    public func respondToFriendRequest(friendshipID: FriendshipID, command: RespondFriendRequestCommand) async throws -> FriendRequest { throw BackendServiceError.offline }
+    public func closeFriendship(_ friendshipID: FriendshipID, idempotencyKey: UUID) async throws { throw BackendServiceError.offline }
+    public func fetchSyncBootstrap() async throws -> SyncBootstrap { throw BackendServiceError.offline }
+    public func fetchAccountEvents(after cursor: Int64, limit: Int, timelineVisible: Bool?) async throws -> AccountEventPage { throw BackendServiceError.offline }
+    public func fetchVisits(status: VisitStatus?) async throws -> [Visit] { throw BackendServiceError.offline }
+    public func createVisit(_ command: CreateVisitCommand) async throws -> Visit { throw BackendServiceError.offline }
+    public func respondToVisit(visitID: PetVisitID, command: RespondToVisitCommand) async throws -> Visit { throw BackendServiceError.offline }
+    public func endVisit(visitID: PetVisitID, command: EndVisitCommand) async throws -> Visit { throw BackendServiceError.offline }
+    public func createVisitAction(visitID: PetVisitID, command: CreateVisitActionCommand) async throws -> VisitAction { throw BackendServiceError.offline }
+    public func createConversation(_ command: CreateConversationCommand) async throws -> ConversationTurnReceipt { throw BackendServiceError.offline }
+    public func fetchConversations() async throws -> [PetConversation] { throw BackendServiceError.offline }
+    public func fetchConversationMessages(conversationID: ConversationID) async throws -> [PetConversationMessage] { throw BackendServiceError.offline }
+    public func sendConversationMessage(conversationID: ConversationID, command: SendConversationMessageCommand) async throws -> ConversationTurnReceipt { throw BackendServiceError.offline }
+    public func endConversation(conversationID: ConversationID, command: EndConversationCommand) async throws -> PetConversation { throw BackendServiceError.offline }
+    public func createLetter(visitID: PetVisitID, command: CreateLetterCommand) async throws -> PetLetter { throw BackendServiceError.offline }
+    public func fetchLetter(_ letterID: LetterID) async throws -> PetLetter { throw BackendServiceError.offline }
+    public func claimPrimaryAgentDevice(_ deviceID: DeviceID, idempotencyKey: UUID) async throws { throw BackendServiceError.offline }
 }
 
-public actor HTTPBackendService: MVPBackendService {
+public actor HTTPBackendService: AccountBackendService {
     private let session: URLSession
     private let tokenProvider: any AccessTokenProvider
     private let requestBuilder: BackendRequestBuilder
@@ -220,340 +73,213 @@ public actor HTTPBackendService: MVPBackendService {
     }
 
     public func checkHealth() async throws -> BackendHealth {
-        try await perform(requestBuilder.healthRequest(accessToken: nil))
+        try await perform(requestBuilder.healthRequest())
     }
 
-    public func sendInteraction(_ command: InteractionCommand) async throws -> InteractionReceipt {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.interactionRequest(command, accessToken: token)
-        )
+    public func startGitHubDeviceAuthorization() async throws -> GitHubDeviceAuthorization {
+        try await perform(requestBuilder.githubDeviceStartRequest())
     }
 
-    public func fetchPetPresence() async throws -> PetPresenceSnapshot {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.petPresenceRequest(accessToken: token)
-        )
+    public func completeGitHubDeviceAuthorization(
+        deviceCode: String,
+        device: DeviceMetadata
+    ) async throws -> GitHubDeviceCompletion {
+        try await perform(requestBuilder.githubDeviceCompleteRequest(
+            deviceCode: deviceCode,
+            device: device
+        ))
     }
 
-    public func startPetVisit(_ command: StartPetVisitCommand) async throws -> PetVisitReceipt {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.startPetVisitRequest(command, accessToken: token)
-        )
+    public func refreshSession(_ refreshToken: String) async throws -> AccountSession {
+        try await perform(requestBuilder.refreshSessionRequest(refreshToken: refreshToken))
     }
 
-    public func returnPetVisit(_ command: ReturnPetVisitCommand) async throws -> PetVisitReceipt {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.returnPetVisitRequest(command, accessToken: token)
-        )
-    }
-
-    public func sendPetVisitInvitation(
-        _ command: SendPetVisitInvitationCommand
-    ) async throws -> PetVisitInvitation {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.sendPetVisitInvitationRequest(command, accessToken: token)
-        )
-    }
-
-    public func fetchPendingPetVisitInvitations() async throws -> [PetVisitInvitation] {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.pendingPetVisitInvitationsRequest(accessToken: token)
-        )
-    }
-
-    public func respondToPetVisitInvitation(
-        _ command: RespondToPetVisitInvitationCommand
-    ) async throws -> PetVisitInvitationReceipt {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.respondToPetVisitInvitationRequest(command, accessToken: token)
-        )
-    }
-
-    public func fetchPersonalTimeline(after cursor: String?) async throws -> PersonalTimelinePage {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.personalTimelineRequest(after: cursor, accessToken: token)
-        )
+    public func logout() async throws {
+        try await performWithoutBody(try await authorized { try $0.logoutRequest(accessToken: $1) })
     }
 
     public func bootstrapDevelopmentProfile(_ profile: String) async throws -> DevBootstrapProfile {
         try await perform(requestBuilder.developmentBootstrapRequest(profile: profile))
     }
 
+    public func fetchCurrentProfile() async throws -> CurrentProfile {
+        try await perform(try await authorized { try $0.currentProfileRequest(accessToken: $1) })
+    }
+
+    public func updateCurrentProfile(accountName: String, petName: String) async throws -> CurrentProfile {
+        try await perform(try await authorized {
+            try $0.updateCurrentProfileRequest(accountName: accountName, petName: petName, accessToken: $1)
+        })
+    }
+
+    public func updateOwnPetAppearance(
+        _ command: PetAppearanceSelectionCommand
+    ) async throws -> PublicPetSnapshot {
+        try await perform(try await authorized {
+            try $0.updateOwnPetAppearanceRequest(command, accessToken: $1)
+        })
+    }
+
+    public func fetchOwnPetCare() async throws -> PetCareState {
+        try await perform(try await authorized { try $0.ownPetCareRequest(accessToken: $1) })
+    }
+
+    public func interactWithPet(
+        petID: PetProfileID,
+        command: PetInteractionCommand
+    ) async throws -> PetInteractionReceipt {
+        try await perform(try await authorized {
+            try $0.petInteractionRequest(petID: petID, command: command, accessToken: $1)
+        })
+    }
+
     public func fetchFriends() async throws -> [FriendProfile] {
-        let token = try await tokenProvider.accessToken()
-        let friendships: [FriendshipWire] = try await perform(
-            requestBuilder.friendshipsRequest(status: .accepted, accessToken: token)
-        )
-        return friendships.compactMap(\.friendProfile)
+        let wires: [FriendshipWire] = try await perform(try await authorized {
+            try $0.friendshipsRequest(status: .accepted, accessToken: $1)
+        })
+        return wires.compactMap(\.friendProfile)
     }
 
     public func fetchFriendRequests(status: FriendRequestStatus?) async throws -> [FriendRequest] {
-        let token = try await tokenProvider.accessToken()
-        let friendships: [FriendshipWire] = try await perform(
-            requestBuilder.friendshipsRequest(status: status, accessToken: token)
-        )
-        return friendships.compactMap(\.friendRequest)
+        let wires: [FriendshipWire] = try await perform(try await authorized {
+            try $0.friendshipsRequest(status: status, accessToken: $1)
+        })
+        return wires.compactMap(\.friendRequest)
     }
 
     public func createFriendRequest(_ command: CreateFriendRequestCommand) async throws -> FriendRequest {
-        let token = try await tokenProvider.accessToken()
-        let friendship: FriendshipWire = try await perform(
-            requestBuilder.createFriendRequest(command, accessToken: token)
-        )
-        guard let request = friendship.friendRequest else {
-            throw BackendClientError.decoding
-        }
-        return request
+        let wire: FriendshipWire = try await perform(try await authorized {
+            try $0.createFriendRequest(command, accessToken: $1)
+        })
+        guard let value = wire.friendRequest else { throw BackendClientError.decoding }
+        return value
     }
 
     public func respondToFriendRequest(
-        requestID: FriendRequestID,
+        friendshipID: FriendshipID,
         command: RespondFriendRequestCommand
     ) async throws -> FriendRequest {
-        let token = try await tokenProvider.accessToken()
-        let friendship: FriendshipWire = try await perform(
-            requestBuilder.respondToFriendRequest(
-                requestID: requestID,
-                command: command,
-                accessToken: token
-            )
-        )
-        guard let request = friendship.friendRequest else {
+        let wire: FriendshipWire = try await perform(try await authorized {
+            try $0.respondToFriendRequest(friendshipID: friendshipID, command: command, accessToken: $1)
+        })
+        guard let value = wire.friendRequest else {
+            if let friend = wire.friendProfile {
+                return FriendRequest(
+                    id: FriendRequestID(rawValue: friend.friendshipID.rawValue),
+                    requesterAccountID: wire.requesterAccountID,
+                    addresseeAccountID: wire.addresseeAccountID,
+                    friendAccountID: friend.accountID,
+                    friendName: friend.accountName,
+                    friendPetID: friend.petID,
+                    friendPetName: friend.petName,
+                    status: .accepted,
+                    createdAt: wire.createdAt,
+                    respondedAt: wire.respondedAt
+                )
+            }
             throw BackendClientError.decoding
         }
-        return request
+        return value
     }
 
-    public func fetchEvents(
-        friendshipID: FriendshipID,
-        after eventID: String?
-    ) async throws -> FriendshipEventPage {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.eventsRequest(
-                friendshipID: friendshipID,
-                after: eventID,
-                accessToken: token
-            )
-        )
+    public func closeFriendship(_ friendshipID: FriendshipID, idempotencyKey: UUID) async throws {
+        let _: FriendshipWire = try await perform(try await authorized {
+            try $0.closeFriendshipRequest(friendshipID: friendshipID, idempotencyKey: idempotencyKey, accessToken: $1)
+        })
     }
 
-    public func fetchTimelineEvents(
-        friendshipID: FriendshipID,
-        after eventID: String?
-    ) async throws -> FriendshipEventPage {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.timelineRequest(
-                friendshipID: friendshipID,
-                after: eventID,
-                accessToken: token
-            )
-        )
+    public func fetchSyncBootstrap() async throws -> SyncBootstrap {
+        try await perform(try await authorized { try $0.syncBootstrapRequest(accessToken: $1) })
     }
 
-    public func createConversation(
-        friendshipID: FriendshipID,
-        _ command: CreateConversationCommand
-    ) async throws -> ConversationTurnReceipt {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.createConversationRequest(
-                friendshipID: friendshipID,
-                command,
-                accessToken: token
-            )
-        )
+    public func fetchAccountEvents(
+        after cursor: Int64,
+        limit: Int = 100,
+        timelineVisible: Bool? = nil
+    ) async throws -> AccountEventPage {
+        try await perform(try await authorized {
+            try $0.accountEventsRequest(after: cursor, limit: limit, timelineVisible: timelineVisible, accessToken: $1)
+        })
     }
 
-    public func fetchConversations(
-        friendshipID: FriendshipID,
-        status: ConversationStatus?
-    ) async throws -> [PetConversation] {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.conversationsRequest(
-                friendshipID: friendshipID,
-                status: status,
-                accessToken: token
-            )
-        )
+    public func fetchVisits(status: VisitStatus?) async throws -> [Visit] {
+        try await perform(try await authorized { try $0.visitsRequest(status: status, accessToken: $1) })
     }
 
-    public func fetchConversationMessages(
-        friendshipID: FriendshipID,
-        conversationID: ConversationID
-    ) async throws -> [PetConversationMessage] {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.conversationMessagesRequest(
-                friendshipID: friendshipID,
-                conversationID: conversationID,
-                accessToken: token
-            )
-        )
+    public func createVisit(_ command: CreateVisitCommand) async throws -> Visit {
+        try await perform(try await authorized { try $0.createVisitRequest(command, accessToken: $1) })
+    }
+
+    public func respondToVisit(visitID: PetVisitID, command: RespondToVisitCommand) async throws -> Visit {
+        try await perform(try await authorized {
+            try $0.respondToVisitRequest(visitID: visitID, command: command, accessToken: $1)
+        })
+    }
+
+    public func endVisit(visitID: PetVisitID, command: EndVisitCommand) async throws -> Visit {
+        try await perform(try await authorized {
+            try $0.endVisitRequest(visitID: visitID, command: command, accessToken: $1)
+        })
+    }
+
+    public func createVisitAction(visitID: PetVisitID, command: CreateVisitActionCommand) async throws -> VisitAction {
+        try await perform(try await authorized {
+            try $0.visitActionRequest(visitID: visitID, command: command, accessToken: $1)
+        })
+    }
+
+    public func createConversation(_ command: CreateConversationCommand) async throws -> ConversationTurnReceipt {
+        try await perform(try await authorized { try $0.createConversationRequest(command, accessToken: $1) })
+    }
+
+    public func fetchConversations() async throws -> [PetConversation] {
+        try await perform(try await authorized { try $0.conversationsRequest(accessToken: $1) })
+    }
+
+    public func fetchConversationMessages(conversationID: ConversationID) async throws -> [PetConversationMessage] {
+        try await perform(try await authorized {
+            try $0.conversationMessagesRequest(conversationID: conversationID, accessToken: $1)
+        })
     }
 
     public func sendConversationMessage(
-        friendshipID: FriendshipID,
         conversationID: ConversationID,
         command: SendConversationMessageCommand
     ) async throws -> ConversationTurnReceipt {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.sendConversationMessageRequest(
-                friendshipID: friendshipID,
-                conversationID: conversationID,
-                command: command,
-                accessToken: token
-            )
-        )
+        try await perform(try await authorized {
+            try $0.sendConversationMessageRequest(conversationID: conversationID, command: command, accessToken: $1)
+        })
     }
 
     public func endConversation(
-        friendshipID: FriendshipID,
         conversationID: ConversationID,
         command: EndConversationCommand
     ) async throws -> PetConversation {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.endConversationRequest(
-                friendshipID: friendshipID,
-                conversationID: conversationID,
-                command: command,
-                accessToken: token
-            )
-        )
+        try await perform(try await authorized {
+            try $0.endConversationRequest(conversationID: conversationID, command: command, accessToken: $1)
+        })
     }
 
-    public func createVisitInvitation(
-        friendshipID: FriendshipID,
-        _ command: CreateVisitInvitationCommand
-    ) async throws -> MVPVisit {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.createVisitInvitationRequest(
-                friendshipID: friendshipID,
-                command,
-                accessToken: token
-            )
-        )
+    public func createLetter(visitID: PetVisitID, command: CreateLetterCommand) async throws -> PetLetter {
+        try await perform(try await authorized {
+            try $0.createLetterRequest(visitID: visitID, command: command, accessToken: $1)
+        })
     }
 
-    public func fetchVisitInvitations(
-        friendshipID: FriendshipID,
-        status: MVPVisitStatus?
-    ) async throws -> [MVPVisit] {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.visitInvitationsRequest(
-                friendshipID: friendshipID,
-                status: status,
-                accessToken: token
-            )
-        )
+    public func fetchLetter(_ letterID: LetterID) async throws -> PetLetter {
+        try await perform(try await authorized { try $0.letterRequest(letterID: letterID, accessToken: $1) })
     }
 
-    public func respondToVisitInvitation(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: RespondToVisitInvitationCommand
-    ) async throws -> MVPVisit {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.respondToVisitInvitationRequest(
-                friendshipID: friendshipID,
-                visitID: visitID,
-                command: command,
-                accessToken: token
-            )
-        )
+    public func claimPrimaryAgentDevice(_ deviceID: DeviceID, idempotencyKey: UUID) async throws {
+        let _: JSONValue = try await perform(try await authorized {
+            try $0.claimAgentRequest(deviceID: deviceID, idempotencyKey: idempotencyKey, accessToken: $1)
+        })
     }
 
-    public func sendVisitInteraction(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: CreateVisitInteractionCommand
-    ) async throws -> VisitInteractionReceipt {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.visitInteractionRequest(
-                friendshipID: friendshipID,
-                visitID: visitID,
-                command: command,
-                accessToken: token
-            )
-        )
-    }
-
-    public func sendVisitReaction(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: CreateVisitReactionCommand
-    ) async throws -> VisitReactionReceipt {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.visitReactionRequest(
-                friendshipID: friendshipID,
-                visitID: visitID,
-                command: command,
-                accessToken: token
-            )
-        )
-    }
-
-    public func createLetter(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: CreateLetterCommand
-    ) async throws -> PetLetter {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.createLetterRequest(
-                friendshipID: friendshipID,
-                visitID: visitID,
-                command: command,
-                accessToken: token
-            )
-        )
-    }
-
-    public func fetchLetter(
-        friendshipID: FriendshipID,
-        _ letterID: LetterID
-    ) async throws -> PetLetter {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.letterRequest(
-                friendshipID: friendshipID,
-                letterID: letterID,
-                accessToken: token
-            )
-        )
-    }
-
-    public func endVisit(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: EndVisitCommand
-    ) async throws -> EndVisitReceipt {
-        let token = try await tokenProvider.accessToken()
-        return try await perform(
-            requestBuilder.endVisitRequest(
-                friendshipID: friendshipID,
-                visitID: visitID,
-                command: command,
-                accessToken: token
-            )
-        )
+    private func authorized(
+        _ make: (BackendRequestBuilder, String?) throws -> URLRequest
+    ) async throws -> URLRequest {
+        try make(requestBuilder, try await tokenProvider.accessToken())
     }
 
     private func perform<Response: Decodable & Sendable>(_ request: URLRequest) async throws -> Response {
@@ -564,18 +290,11 @@ public actor HTTPBackendService: MVPBackendService {
         } catch {
             throw BackendClientError.transport(String(describing: error))
         }
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw BackendClientError.invalidResponse
+        guard let http = response as? HTTPURLResponse else { throw BackendClientError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let envelope = try? Self.decoder.decode(APIErrorEnvelope.self, from: data)
+            throw BackendClientError.httpStatus(statusCode: http.statusCode, code: envelope?.error.code)
         }
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            let errorEnvelope = try? Self.decoder.decode(APIErrorEnvelope.self, from: data)
-            throw BackendClientError.httpStatus(
-                statusCode: httpResponse.statusCode,
-                code: errorEnvelope?.error.code
-            )
-        }
-
         do {
             return try Self.decoder.decode(APIEnvelope<Response>.self, from: data).data
         } catch {
@@ -583,9 +302,22 @@ public actor HTTPBackendService: MVPBackendService {
         }
     }
 
+    private func performWithoutBody(_ request: URLRequest) async throws {
+        let response: URLResponse
+        do {
+            (_, response) = try await session.data(for: request)
+        } catch {
+            throw BackendClientError.transport(String(describing: error))
+        }
+        guard let http = response as? HTTPURLResponse else { throw BackendClientError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw BackendClientError.httpStatus(statusCode: http.statusCode, code: nil)
+        }
+    }
+
     private static var decoder: JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .millisecondsSince1970
         return decoder
     }
 }
@@ -594,597 +326,247 @@ public enum BackendServiceFactory {
     public static func make(
         configuration: BackendConfiguration,
         tokenProvider: any AccessTokenProvider = AnonymousAccessTokenProvider()
-    ) -> any MVPBackendService {
+    ) -> any AccountBackendService {
         switch configuration.mode {
-        case .offline:
-            OfflineBackendService(apiVersion: configuration.apiVersion)
-        case .remote:
-            HTTPBackendService(
-                configuration: configuration,
-                tokenProvider: tokenProvider
-            )
+        case .offline: OfflineBackendService(apiVersion: configuration.apiVersion)
+        case .remote: HTTPBackendService(configuration: configuration, tokenProvider: tokenProvider)
         }
     }
 }
 
 package struct BackendRequestBuilder: Sendable {
     private let configuration: BackendConfiguration
+    package init(configuration: BackendConfiguration) { self.configuration = configuration }
 
-    package init(configuration: BackendConfiguration) {
-        self.configuration = configuration
+    package func healthRequest() throws -> URLRequest {
+        try request(path: ["health"], method: "GET", accessToken: nil)
     }
 
-    package func healthRequest(accessToken: String?) throws -> URLRequest {
-        try request(path: "health", method: "GET", body: nil, accessToken: accessToken)
+    package func githubDeviceStartRequest() throws -> URLRequest {
+        try request(path: ["auth", "github", "device", "start"], method: "POST", accessToken: nil)
     }
 
-    package func interactionRequest(
-        _ command: InteractionCommand,
-        accessToken: String?
+    package func githubDeviceCompleteRequest(
+        deviceCode: String,
+        device: DeviceMetadata
     ) throws -> URLRequest {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let body = try encoder.encode(command)
-        var request = try request(
-            path: "interactions",
-            method: "POST",
-            body: body,
-            accessToken: accessToken
-        )
-        request.setValue(command.idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
-        return request
-    }
-
-    package func petPresenceRequest(accessToken: String?) throws -> URLRequest {
         try request(
-            pathComponents: ["pet-presence"],
-            method: "GET",
-            body: nil,
-            accessToken: accessToken
-        )
-    }
-
-    package func startPetVisitRequest(
-        _ command: StartPetVisitCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        let body = try Self.encoder.encode(command)
-        var request = try request(
-            pathComponents: ["pet-visits"],
+            path: ["auth", "github", "device", "complete"],
             method: "POST",
-            body: body,
-            accessToken: accessToken
-        )
-        request.setValue(command.idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
-        return request
-    }
-
-    package func returnPetVisitRequest(
-        _ command: ReturnPetVisitCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        let body = try Self.encoder.encode(command)
-        var request = try request(
-            pathComponents: ["pet-visits", command.visitID.rawValue, "return"],
-            method: "POST",
-            body: body,
-            accessToken: accessToken
-        )
-        request.setValue(command.idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
-        return request
-    }
-
-    package func sendPetVisitInvitationRequest(
-        _ command: SendPetVisitInvitationCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        let body = try Self.encoder.encode(command)
-        var request = try request(
-            pathComponents: ["pet-visit-invitations"],
-            method: "POST",
-            body: body,
-            accessToken: accessToken
-        )
-        request.setValue(command.idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
-        return request
-    }
-
-    package func pendingPetVisitInvitationsRequest(
-        accessToken: String?
-    ) throws -> URLRequest {
-        var request = try request(
-            pathComponents: ["pet-visit-invitations"],
-            method: "GET",
-            body: nil,
-            accessToken: accessToken
-        )
-        if var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false) {
-            components.queryItems = [URLQueryItem(name: "status", value: "pending")]
-            request.url = components.url
-        }
-        return request
-    }
-
-    package func respondToPetVisitInvitationRequest(
-        _ command: RespondToPetVisitInvitationCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        let body = try Self.encoder.encode(command)
-        var request = try request(
-            pathComponents: [
-                "pet-visit-invitations",
-                command.invitationID.rawValue,
-                "response"
-            ],
-            method: "POST",
-            body: body,
-            accessToken: accessToken
-        )
-        request.setValue(command.idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
-        return request
-    }
-
-    package func personalTimelineRequest(
-        after cursor: String?,
-        accessToken: String?
-    ) throws -> URLRequest {
-        var request = try request(
-            pathComponents: ["friendship-events"],
-            method: "GET",
-            body: nil,
-            accessToken: accessToken
-        )
-        if let cursor, !cursor.isEmpty,
-           var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false) {
-            components.queryItems = [URLQueryItem(name: "after", value: cursor)]
-            request.url = components.url
-        }
-        return request
-    }
-
-    @available(*, deprecated, renamed: "personalTimelineRequest(after:accessToken:)")
-    package func coupleTimelineRequest(
-        after cursor: String?,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try personalTimelineRequest(after: cursor, accessToken: accessToken)
-    }
-
-    package func developmentBootstrapRequest(profile: String) throws -> URLRequest {
-        struct Body: Encodable { let profile: String }
-        return try request(
-            pathComponents: ["dev", "bootstrap"],
-            method: "POST",
-            body: Self.encoder.encode(Body(profile: profile)),
+            body: GitHubDeviceCompleteBody(deviceCode: deviceCode, device: device),
             accessToken: nil
         )
     }
 
-    package func friendshipsRequest(
-        status: FriendRequestStatus?,
-        accessToken: String?
-    ) throws -> URLRequest {
-        var result = try request(
-            pathComponents: ["friendships"],
-            method: "GET",
-            body: nil,
-            accessToken: accessToken
-        )
-        if let status,
-           var components = URLComponents(url: result.url!, resolvingAgainstBaseURL: false) {
-            components.queryItems = [URLQueryItem(name: "status", value: status.rawValue)]
-            result.url = components.url
-        }
-        return result
-    }
-
-    package func createFriendRequest(
-        _ command: CreateFriendRequestCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try idempotentRequest(
-            pathComponents: ["friendships"],
-            body: command,
-            key: command.idempotencyKey,
-            accessToken: accessToken
-        )
-    }
-
-    package func respondToFriendRequest(
-        requestID: FriendRequestID,
-        command: RespondFriendRequestCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try idempotentRequest(
-            pathComponents: ["friendships", requestID.rawValue, "respond"],
-            body: command,
-            key: command.idempotencyKey,
-            accessToken: accessToken
-        )
-    }
-
-    package func eventsRequest(
-        friendshipID: FriendshipID,
-        after eventID: String?,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try cursorRequest(
-            pathComponents: ["events"],
-            friendshipID: friendshipID,
-            after: eventID,
-            accessToken: accessToken
-        )
-    }
-
-    package func timelineRequest(
-        friendshipID: FriendshipID,
-        after eventID: String?,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try cursorRequest(
-            pathComponents: ["timeline"],
-            friendshipID: friendshipID,
-            after: eventID,
-            accessToken: accessToken
-        )
-    }
-
-    package func createConversationRequest(
-        friendshipID: FriendshipID,
-        _ command: CreateConversationCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try addingFriendshipID(friendshipID, to: idempotentRequest(
-            pathComponents: ["conversations"],
-            body: command,
-            key: command.idempotencyKey,
-            accessToken: accessToken
-        ))
-    }
-
-    package func conversationsRequest(
-        friendshipID: FriendshipID,
-        status: ConversationStatus?,
-        accessToken: String?
-    ) throws -> URLRequest {
-        var result = try request(
-            pathComponents: ["conversations"],
-            method: "GET",
-            body: nil,
-            accessToken: accessToken
-        )
-        if let status,
-           var components = URLComponents(url: result.url!, resolvingAgainstBaseURL: false) {
-            components.queryItems = [URLQueryItem(name: "status", value: status.rawValue)]
-            result.url = components.url
-        }
-        return try addingFriendshipID(friendshipID, to: result)
-    }
-
-    package func conversationMessagesRequest(
-        friendshipID: FriendshipID,
-        conversationID: ConversationID,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try addingFriendshipID(friendshipID, to: request(
-            pathComponents: ["conversations", conversationID.rawValue, "messages"],
-            method: "GET",
-            body: nil,
-            accessToken: accessToken
-        ))
-    }
-
-    package func sendConversationMessageRequest(
-        friendshipID: FriendshipID,
-        conversationID: ConversationID,
-        command: SendConversationMessageCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try addingFriendshipID(friendshipID, to: idempotentRequest(
-            pathComponents: ["conversations", conversationID.rawValue, "messages"],
-            body: command,
-            key: command.idempotencyKey,
-            accessToken: accessToken
-        ))
-    }
-
-    package func endConversationRequest(
-        friendshipID: FriendshipID,
-        conversationID: ConversationID,
-        command: EndConversationCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try addingFriendshipID(friendshipID, to: idempotentRequest(
-            pathComponents: ["conversations", conversationID.rawValue, "end"],
-            body: command,
-            key: command.idempotencyKey,
-            accessToken: accessToken
-        ))
-    }
-
-    package func createVisitInvitationRequest(
-        friendshipID: FriendshipID,
-        _ command: CreateVisitInvitationCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try addingFriendshipID(friendshipID, to: idempotentRequest(
-            pathComponents: ["visit-invitations"],
-            body: command,
-            key: command.idempotencyKey,
-            accessToken: accessToken
-        ))
-    }
-
-    package func visitInvitationsRequest(
-        friendshipID: FriendshipID,
-        status: MVPVisitStatus?,
-        accessToken: String?
-    ) throws -> URLRequest {
-        var result = try request(
-            pathComponents: ["visit-invitations"],
-            method: "GET",
-            body: nil,
-            accessToken: accessToken
-        )
-        if let status,
-           var components = URLComponents(url: result.url!, resolvingAgainstBaseURL: false) {
-            components.queryItems = [URLQueryItem(name: "status", value: status.rawValue)]
-            result.url = components.url
-        }
-        return try addingFriendshipID(friendshipID, to: result)
-    }
-
-    package func respondToVisitInvitationRequest(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: RespondToVisitInvitationCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try addingFriendshipID(friendshipID, to: idempotentRequest(
-            pathComponents: ["visit-invitations", visitID.rawValue, "respond"],
-            body: command,
-            key: command.idempotencyKey,
-            accessToken: accessToken
-        ))
-    }
-
-    package func visitInteractionRequest(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: CreateVisitInteractionCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try addingFriendshipID(friendshipID, to: idempotentRequest(
-            pathComponents: ["visits", visitID.rawValue, "interactions"],
-            body: command,
-            key: command.idempotencyKey,
-            accessToken: accessToken
-        ))
-    }
-
-    package func visitReactionRequest(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: CreateVisitReactionCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try addingFriendshipID(friendshipID, to: idempotentRequest(
-            pathComponents: ["visits", visitID.rawValue, "reactions"],
-            body: command,
-            key: command.idempotencyKey,
-            accessToken: accessToken
-        ))
-    }
-
-    package func createLetterRequest(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: CreateLetterCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try addingFriendshipID(friendshipID, to: idempotentRequest(
-            pathComponents: ["visits", visitID.rawValue, "letter"],
-            body: command,
-            key: command.idempotencyKey,
-            accessToken: accessToken
-        ))
-    }
-
-    package func letterRequest(
-        friendshipID: FriendshipID,
-        letterID: LetterID,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try addingFriendshipID(friendshipID, to: request(
-            pathComponents: ["letters", letterID.rawValue],
-            method: "GET",
-            body: nil,
-            accessToken: accessToken
-        ))
-    }
-
-    package func endVisitRequest(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: EndVisitCommand,
-        accessToken: String?
-    ) throws -> URLRequest {
-        try addingFriendshipID(friendshipID, to: idempotentRequest(
-            pathComponents: ["visits", visitID.rawValue, "end"],
-            body: command,
-            key: command.idempotencyKey,
-            accessToken: accessToken
-        ))
-    }
-
-    private func addingFriendshipID(
-        _ friendshipID: FriendshipID,
-        to request: URLRequest
-    ) throws -> URLRequest {
-        guard let url = request.url,
-              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            throw BackendClientError.invalidRequest
-        }
-        var result = request
-        var queryItems = components.queryItems ?? []
-        queryItems.removeAll { $0.name == "friendshipID" }
-        queryItems.insert(
-            URLQueryItem(name: "friendshipID", value: friendshipID.rawValue),
-            at: 0
-        )
-        components.queryItems = queryItems
-        guard let scopedURL = components.url else {
-            throw BackendClientError.invalidRequest
-        }
-        result.url = scopedURL
-        return result
-    }
-
-    private func cursorRequest(
-        pathComponents: [String],
-        friendshipID: FriendshipID,
-        after eventID: String?,
-        accessToken: String?
-    ) throws -> URLRequest {
-        var result = try request(
-            pathComponents: pathComponents,
-            method: "GET",
-            body: nil,
-            accessToken: accessToken
-        )
-        if var components = URLComponents(url: result.url!, resolvingAgainstBaseURL: false) {
-            var queryItems = [
-                URLQueryItem(name: "friendshipID", value: friendshipID.rawValue)
-            ]
-            if let eventID, !eventID.isEmpty {
-                queryItems.append(URLQueryItem(name: "after", value: eventID))
-            }
-            components.queryItems = queryItems
-            result.url = components.url
-        }
-        return result
-    }
-
-    private func idempotentRequest<Body: Encodable>(
-        pathComponents: [String],
-        body: Body,
-        key: UUID,
-        accessToken: String?
-    ) throws -> URLRequest {
-        var result = try request(
-            pathComponents: pathComponents,
-            method: "POST",
-            body: Self.encoder.encode(body),
-            accessToken: accessToken
-        )
-        result.setValue(key.uuidString, forHTTPHeaderField: "Idempotency-Key")
-        return result
-    }
-
-    private func request(
-        path: String,
-        method: String,
-        body: Data?,
-        accessToken: String?
-    ) throws -> URLRequest {
+    package func refreshSessionRequest(refreshToken: String) throws -> URLRequest {
         try request(
-            pathComponents: path.split(separator: "/").map(String.init),
-            method: method,
-            body: body,
-            accessToken: accessToken
+            path: ["auth", "refresh"],
+            method: "POST",
+            body: RefreshSessionBody(refreshToken: refreshToken),
+            accessToken: nil
         )
     }
 
-    private func request(
-        pathComponents: [String],
-        method: String,
-        body: Data?,
+    package func logoutRequest(accessToken: String?) throws -> URLRequest {
+        try request(path: ["auth", "logout"], method: "POST", accessToken: accessToken)
+    }
+    package func developmentBootstrapRequest(profile: String) throws -> URLRequest {
+        try request(path: ["dev", "bootstrap"], method: "POST", body: BodyProfile(profile: profile), accessToken: nil)
+    }
+    package func currentProfileRequest(accessToken: String?) throws -> URLRequest {
+        try request(path: ["me", "profile"], method: "GET", accessToken: accessToken)
+    }
+    package func updateCurrentProfileRequest(accountName: String, petName: String, accessToken: String?) throws -> URLRequest {
+        try request(path: ["me", "profile"], method: "PATCH", body: ProfileBody(accountName: accountName, petName: petName), accessToken: accessToken)
+    }
+    package func updateOwnPetAppearanceRequest(
+        _ command: PetAppearanceSelectionCommand,
         accessToken: String?
     ) throws -> URLRequest {
-        guard let baseURL = configuration.baseURL else {
-            throw BackendClientError.invalidRequest
-        }
-        var url = baseURL.appendingPathComponent(configuration.apiVersion, isDirectory: true)
-        for (index, component) in pathComponents.enumerated() {
-            url.appendPathComponent(component, isDirectory: index < pathComponents.count - 1)
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.httpBody = body
-        request.timeoutInterval = configuration.requestTimeout
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if body != nil {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        }
-        request.setValue("macos", forHTTPHeaderField: "X-Mino-Client")
-        if let accessToken, !accessToken.isEmpty {
-            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        }
-        return request
+        var value = try request(
+            path: ["me", "pet"],
+            method: "PATCH",
+            body: command,
+            accessToken: accessToken
+        )
+        value.setValue(command.idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
+        return value
+    }
+    package func ownPetCareRequest(accessToken: String?) throws -> URLRequest {
+        try request(path: ["me", "pet-state"], method: "GET", accessToken: accessToken)
+    }
+    package func petInteractionRequest(
+        petID: PetProfileID,
+        command: PetInteractionCommand,
+        accessToken: String?
+    ) throws -> URLRequest {
+        try idempotent(
+            path: ["pets", petID.rawValue, "interactions"],
+            body: command,
+            key: command.idempotencyKey,
+            accessToken: accessToken
+        )
+    }
+    package func friendshipsRequest(status: FriendRequestStatus?, accessToken: String?) throws -> URLRequest {
+        let value = status.map { $0 == .cancelled ? "closed" : $0.rawValue }
+        return try request(path: ["friendships"], method: "GET", query: value.map { [URLQueryItem(name: "status", value: $0)] } ?? [], accessToken: accessToken)
+    }
+    package func createFriendRequest(_ command: CreateFriendRequestCommand, accessToken: String?) throws -> URLRequest {
+        try idempotent(path: ["friendships"], body: command, key: command.idempotencyKey, accessToken: accessToken)
+    }
+    package func respondToFriendRequest(friendshipID: FriendshipID, command: RespondFriendRequestCommand, accessToken: String?) throws -> URLRequest {
+        try idempotent(path: ["friendships", friendshipID.rawValue, "respond"], body: command, key: command.idempotencyKey, accessToken: accessToken)
+    }
+    package func closeFriendshipRequest(friendshipID: FriendshipID, idempotencyKey: UUID, accessToken: String?) throws -> URLRequest {
+        try idempotent(path: ["friendships", friendshipID.rawValue, "close"], body: EmptyBody(), key: idempotencyKey, accessToken: accessToken)
+    }
+    package func syncBootstrapRequest(accessToken: String?) throws -> URLRequest {
+        try request(path: ["sync", "bootstrap"], method: "GET", accessToken: accessToken)
+    }
+    package func accountEventsRequest(after cursor: Int64, limit: Int, timelineVisible: Bool?, accessToken: String?) throws -> URLRequest {
+        var query = [URLQueryItem(name: "after", value: String(cursor)), URLQueryItem(name: "limit", value: String(limit))]
+        if let timelineVisible { query.append(URLQueryItem(name: "timelineVisible", value: String(timelineVisible))) }
+        return try request(path: ["events"], method: "GET", query: query, accessToken: accessToken)
+    }
+    package func visitsRequest(status: VisitStatus?, accessToken: String?) throws -> URLRequest {
+        try request(path: ["visits"], method: "GET", query: status.map { [URLQueryItem(name: "status", value: $0.rawValue)] } ?? [], accessToken: accessToken)
+    }
+    package func createVisitRequest(_ command: CreateVisitCommand, accessToken: String?) throws -> URLRequest {
+        try idempotent(path: ["visits"], body: command, key: command.idempotencyKey, accessToken: accessToken)
+    }
+    package func respondToVisitRequest(visitID: PetVisitID, command: RespondToVisitCommand, accessToken: String?) throws -> URLRequest {
+        try idempotent(path: ["visits", visitID.rawValue, "respond"], body: command, key: command.idempotencyKey, accessToken: accessToken)
+    }
+    package func endVisitRequest(visitID: PetVisitID, command: EndVisitCommand, accessToken: String?) throws -> URLRequest {
+        try idempotent(path: ["visits", visitID.rawValue, "end"], body: command, key: command.idempotencyKey, accessToken: accessToken)
+    }
+    package func visitActionRequest(visitID: PetVisitID, command: CreateVisitActionCommand, accessToken: String?) throws -> URLRequest {
+        try idempotent(path: ["visits", visitID.rawValue, "actions"], body: command, key: command.idempotencyKey, accessToken: accessToken)
+    }
+    package func createConversationRequest(_ command: CreateConversationCommand, accessToken: String?) throws -> URLRequest {
+        try idempotent(path: ["conversations"], body: command, key: command.idempotencyKey, accessToken: accessToken)
+    }
+    package func conversationsRequest(accessToken: String?) throws -> URLRequest {
+        try request(path: ["conversations"], method: "GET", accessToken: accessToken)
+    }
+    package func conversationMessagesRequest(conversationID: ConversationID, accessToken: String?) throws -> URLRequest {
+        try request(path: ["conversations", conversationID.rawValue, "messages"], method: "GET", accessToken: accessToken)
+    }
+    package func sendConversationMessageRequest(conversationID: ConversationID, command: SendConversationMessageCommand, accessToken: String?) throws -> URLRequest {
+        try idempotent(path: ["conversations", conversationID.rawValue, "messages"], body: command, key: command.idempotencyKey, accessToken: accessToken)
+    }
+    package func endConversationRequest(conversationID: ConversationID, command: EndConversationCommand, accessToken: String?) throws -> URLRequest {
+        try idempotent(path: ["conversations", conversationID.rawValue, "end"], body: command, key: command.idempotencyKey, accessToken: accessToken)
+    }
+    package func createLetterRequest(visitID: PetVisitID, command: CreateLetterCommand, accessToken: String?) throws -> URLRequest {
+        try idempotent(path: ["visits", visitID.rawValue, "letters"], body: command, key: command.idempotencyKey, accessToken: accessToken)
+    }
+    package func letterRequest(letterID: LetterID, accessToken: String?) throws -> URLRequest {
+        try request(path: ["letters", letterID.rawValue], method: "GET", accessToken: accessToken)
+    }
+    package func claimAgentRequest(deviceID: DeviceID, idempotencyKey: UUID, accessToken: String?) throws -> URLRequest {
+        try idempotent(path: ["devices", deviceID.rawValue, "claim-agent"], body: EmptyBody(), key: idempotencyKey, accessToken: accessToken)
     }
 
-    private static var encoder: JSONEncoder {
+    private func idempotent<Body: Encodable>(path: [String], body: Body, key: UUID, accessToken: String?) throws -> URLRequest {
+        var value = try request(path: path, method: "POST", body: body, accessToken: accessToken)
+        value.setValue(key.uuidString, forHTTPHeaderField: "Idempotency-Key")
+        return value
+    }
+
+    private func request(path: [String], method: String, query: [URLQueryItem] = [], accessToken: String?) throws -> URLRequest {
+        try request(path: path, method: method, data: nil, query: query, accessToken: accessToken)
+    }
+    private func request<Body: Encodable>(path: [String], method: String, body: Body, query: [URLQueryItem] = [], accessToken: String?) throws -> URLRequest {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        return try request(path: path, method: method, data: encoder.encode(body), query: query, accessToken: accessToken)
+    }
+    private func request(path: [String], method: String, data: Data?, query: [URLQueryItem], accessToken: String?) throws -> URLRequest {
+        guard let baseURL = configuration.baseURL else { throw BackendClientError.invalidRequest }
+        var url = baseURL.appendingPathComponent(configuration.apiVersion, isDirectory: true)
+        for (index, component) in path.enumerated() {
+            url.appendPathComponent(component, isDirectory: index < path.count - 1)
+        }
+        if !query.isEmpty {
+            guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { throw BackendClientError.invalidRequest }
+            components.queryItems = query
+            guard let queryURL = components.url else { throw BackendClientError.invalidRequest }
+            url = queryURL
+        }
+        var result = URLRequest(url: url)
+        result.httpMethod = method
+        result.httpBody = data
+        result.timeoutInterval = configuration.requestTimeout
+        result.setValue("application/json", forHTTPHeaderField: "Accept")
+        if data != nil { result.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        if let accessToken { result.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization") }
+        result.setValue("macos", forHTTPHeaderField: "X-Mino-Client")
+        return result
     }
 }
 
-private struct APIEnvelope<Payload: Decodable & Sendable>: Decodable, Sendable {
-    let data: Payload
-}
-
-package struct FriendshipWire: Decodable, Sendable {
-    struct Friend: Decodable, Sendable {
+package struct FriendshipWire: Codable, Sendable {
+    struct Friend: Codable, Sendable {
         let accountID: AccountID
         let displayName: String
-        let petID: PetProfileID
-        let petName: String
+        let pet: PublicPetSnapshot
     }
-
     let id: FriendshipID
     let requesterAccountID: AccountID
     let addresseeAccountID: AccountID
-    let status: FriendRequestStatus
+    let status: FriendshipStatus
+    let version: Int64
     let createdAt: Date
     let respondedAt: Date?
+    let closedAt: Date?
     let friend: Friend
+    let familiarity: PetFamiliarity?
 
     var friendProfile: FriendProfile? {
         guard status == .accepted else { return nil }
         return FriendProfile(
-            friendshipID: id,
-            accountID: friend.accountID,
-            accountName: friend.displayName,
-            petID: friend.petID,
-            petName: friend.petName,
-            friendsSince: respondedAt ?? createdAt
+            friendshipID: id, accountID: friend.accountID, accountName: friend.displayName,
+            petID: friend.pet.petID, petName: friend.pet.displayName,
+            friendsSince: respondedAt ?? createdAt,
+            publicCare: friend.pet.publicCare,
+            familiarity: familiarity,
+            characterID: PetCharacterID(appearance: friend.pet.appearance)
         )
     }
-
     var friendRequest: FriendRequest? {
-        guard status != .cancelled else { return nil }
+        guard status != .accepted else { return nil }
+        let mapped: FriendRequestStatus = switch status {
+        case .pending: .pending
+        case .accepted: .accepted
+        case .rejected: .declined
+        case .closed: .cancelled
+        }
         return FriendRequest(
             id: FriendRequestID(rawValue: id.rawValue),
             requesterAccountID: requesterAccountID,
             addresseeAccountID: addresseeAccountID,
             friendAccountID: friend.accountID,
             friendName: friend.displayName,
-            friendPetID: friend.petID,
-            friendPetName: friend.petName,
-            status: status,
+            friendPetID: friend.pet.petID,
+            friendPetName: friend.pet.displayName,
+            status: mapped,
             createdAt: createdAt,
             respondedAt: respondedAt
         )
     }
 }
 
-private struct APIErrorEnvelope: Decodable, Sendable {
-    struct APIError: Decodable, Sendable {
-        let code: String
-        let message: String?
-    }
-
+private struct APIEnvelope<Value: Decodable>: Decodable { let data: Value }
+private struct APIErrorEnvelope: Decodable {
+    struct APIError: Decodable { let code: String; let message: String? }
     let error: APIError
 }
+private struct BodyProfile: Encodable { let profile: String }
+private struct GitHubDeviceCompleteBody: Encodable {
+    let deviceCode: String
+    let device: DeviceMetadata
+}
+private struct RefreshSessionBody: Encodable { let refreshToken: String }
+private struct ProfileBody: Encodable { let accountName: String; let petName: String }
+private struct EmptyBody: Encodable {}

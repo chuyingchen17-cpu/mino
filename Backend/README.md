@@ -1,58 +1,77 @@
-# Mino Backend MVP
+# Mino Worker
 
-Single-process Fastify service for local macOS pet Agents. Every account owns one pet and may connect to multiple accounts through explicit friendships. PostgreSQL is the only durable server-side dependency; Redis and background workers are intentionally not used.
+Mino 后端是 Cloudflare Worker。Hono 提供严格校验的 REST/OpenAPI 边界，D1 保存业务事实，`AccountRealtimeHub` Durable Object 通过 Hibernation WebSocket API 向一个账号的全部在线设备发送轻量提示。
 
-## Local development
+## 本地开发
 
 ```sh
-cp .env.example .env
-docker compose up -d postgres
-npm install
-npm run db:migrate
+cp .env.example .dev.vars
+npm ci
+npm run db:migrate:local
 npm run dev
 ```
 
-The API is available at `http://127.0.0.1:8080/v1`. Root routes are also registered for compatibility. Check either `/health` or `/v1/health`.
-
-Create the isolated local identities with:
+默认地址为 `http://127.0.0.1:8787`。健康检查：
 
 ```sh
-curl -sS http://127.0.0.1:8080/v1/dev/bootstrap \
+curl http://127.0.0.1:8787/v1/health
+```
+
+开发身份仅在 `ENVIRONMENT=development` 且 `DEV_BOOTSTRAP_ENABLED=true` 时可用：
+
+```sh
+curl -sS http://127.0.0.1:8787/v1/dev/bootstrap \
   -H 'content-type: application/json' \
   -d '{"profile":"alice"}'
 ```
 
-Repeat with `bob`. `charlie` is also available to exercise the friendship request flow. Alice and Bob start as accepted friends; Charlie starts with no friends. The returned bearer tokens are deterministic, public local-development credentials, so local Keychain sessions remain valid after a service restart. They are not secrets and must never be used outside local development. `/dev/bootstrap` is disabled unless `DEV_BOOTSTRAP_ENABLED=true`; production startup rejects that setting and the PostgreSQL store rejects these known development tokens.
+Alice 与 Bob 预置为好友；Charlie 没有预置好友。开发凭证只用于本机测试。
 
-For production, set `LETTER_ENCRYPTION_KEY` to the Base64 encoding of exactly 32 random bytes and keep it in the deployment secret store. Development derives a stable local-only key from `DATABASE_URL` when the variable is absent. Losing or changing the key makes encrypted letters unreadable.
+## 命令
 
-## Commands
+- `npm run typecheck`：检查 Worker 与测试 TypeScript。
+- `npm test`：使用官方 Workers Vitest 集成，在 Workers Runtime 中测试真实 D1 与 Durable Object binding。
+- `npm run openapi`：从路由生成 `openapi.yaml`。
+- `npm run db:migrate:local`：迁移本地 Wrangler D1。
+- `npm run db:migrate:remote`：迁移 production D1；先替换正式资源 ID。
+- `npm run deploy:dry-run`：验证 Worker bundle、D1 binding 和 Durable Object migration，不部署。
 
-- `npm run typecheck` — strict TypeScript check.
-- `npm test` — route and state-machine tests using the in-memory store; no database or network required.
-- `RUN_POSTGRES_TESTS=true DATABASE_URL=postgres://… npm test -- tests/postgres.integration.test.ts` — opt-in real PostgreSQL coverage. Each test migrates and drops only its own random schema; the database role needs schema-create permission.
-- `npm run build` — compile the server and migrations into `dist/`.
-- `npm run db:migrate` — apply PostgreSQL migrations.
-- `npm run db:rollback` — roll back one migration.
+## 资源与变量
 
-## Runtime model
+`wrangler.jsonc` 声明：
 
-- `accounts` own pets independently of relationships. `friendships` is the authority for cross-account access; legacy `couples/couple_id` values remain only as internal storage scopes so existing databases can migrate without rewriting historical resources.
-- Friendship APIs are `GET /friendships`, `POST /friendships`, and `POST /friendships/:friendshipID/respond`. Only the addressee can accept or reject. Rejected pairs may apply again, while a pending or accepted pair is unique.
-- HTTP business writes commit the state change, durable friendship event, and idempotency receipt in one PostgreSQL transaction.
-- Every idempotency receipt records a canonical request fingerprint. An exact retry replays the first result; the same key with a different payload returns `409 idempotency_key_reused`.
-- Cross-account routes accept `friendshipID` as a query parameter. For compatibility it may be omitted only when the account has exactly one accepted friendship; otherwise the server returns `409 friendship_context_required`.
-- `/events` and `/timeline` are deliberately friendship-scoped, not account-global. A personal timeline client lists accepted friendships, catches up each friendship with its own cursor, and merges the resulting events by `occurredAt` (using `sequence` as a stable tie-breaker). Event inserts hold a friendship-scoped PostgreSQL transaction lock from sequence allocation through commit, so a later visible cursor cannot overtake an earlier uncommitted event. Pending friendship requests are state from `GET /friendships?status=pending`, not social timeline events. This keeps cursor authorization and relationship privacy explicit without introducing a second account-event store in the MVP.
-- WebSocket only accelerates delivery. Clients recover missed events with `GET /events?friendshipID=<id>&after=<eventID>`. `/ws?friendshipID=<id>&after=<eventID>` also replays the handoff gap while buffering concurrent publications, so an event cannot disappear between REST catch-up and subscription. Empty pages preserve the requested cursor; malformed UUIDs return 400 and unknown or cross-friendship cursor IDs return 404.
-- The server stores only logical pet residence (`home` is derived when no active visit exists; otherwise the visitor is `visiting`). Presence checks active visits globally, but a friendship snapshot exposes `hostAccountID` and `activeVisitID` only for a visit in that friendship; another friendship sees only that the pet is away. Screen coordinates and animation remain local.
-- A visitor pet and a host account can each participate in at most one active visit globally, enforced by partial unique PostgreSQL indexes.
-- Only the account opposite `requestedByAccountID` can answer a visit invitation: the host answers a visitor-owner request, and the visitor owner answers a host request. Invitation events carry both account IDs for deterministic client routing.
-- A friendship has at most one active pet conversation. Clients restore it after restart through `GET /conversations?friendshipID=<id>&status=active` and rebuild the transcript with `GET /conversations/:id/messages?friendshipID=<id>`. Pet conversations stop after the sixth pet message without a server-authored summary. The initiating pet's owner then runs its local Agent and is the only party allowed to submit the first timeline summary through `/conversations/:id/end`, even though the conversation is already ended.
-- Host interactions travel to the visitor's owner Agent; its response returns through `POST /visits/:visitID/reactions` and is never generated by the server.
-- Agent requests may supply all accepted targets in `state.friendPetIDs`. The server verifies every ID against current friendships before calling the model, and rejects any social decision whose recipient falls outside that request-scoped whitelist. `targetPetID` and `senderPetID` remain event-context hints rather than authorization.
-- The deterministic development model sends a `send_pet_message` decision on `periodic_wake`, an `excited` visitor reaction on `visit_started`, and a concise summary-style `speak_to_owner` decision on `conversation_ended` when those actions are offered. Thus an offline visitor remains asleep; an online origin Agent explicitly wakes the host animation through the reaction endpoint.
-- Model prompts, raw provider responses, and pet memories are not persisted. The validated decision, memory disposition, and usage are stored by `inferenceID`, making retries and restarts replay the original response without a second charge. The ID is bound to a keyed request fingerprint; a different request cannot reuse it. A concurrent live claim returns `409 inference_in_progress`, while a stale started claim returns `409 inference_outcome_unknown` and is never sent upstream again under that ID. Provider calls also carry the inference ID as an idempotency header when supported.
-- Human letter bodies are stored as AES-256-GCM ciphertext in both `letters.body` and idempotency receipts. Event payloads contain only ID/routing metadata, never the body. The recipient reads the decrypted body through `GET /letters/:letterID` only after delivery. Agent requests use a strict state allowlist, reject letter-shaped fields and memories, and only accept the sealed-letter trigger with its fixed body-free summary.
-- Legacy `POST /pet-visits` is deprecated and returns `409 visit_invitation_required` before writing anything; callers must use the two-party invitation handshake.
+- `DB`：D1 binding；本地、staging、production 使用独立数据库。
+- `ACCOUNT_REALTIME`：`AccountRealtimeHub` Durable Object binding。
+- `v1` Durable Object migration。
 
-The full wire contract and event payload conventions are in [openapi.yaml](./openapi.yaml).
+以下值必须通过 `.dev.vars`、Wrangler vars 或 `wrangler secret put` 提供：
+
+- GitHub：`GITHUB_CLIENT_ID`，对应启用了 Device Flow 的 OAuth App
+- 会话：`SESSION_TOKEN_PEPPER`
+- 信件：`LETTER_ENCRYPTION_KEY_V1`
+- 模型：可选 `MODEL_PROVIDER_API_KEY`；未配置时社交事实功能可用，但 Agent 模型调用会失败并由客户端降级
+
+生产环境必须设置 `ENVIRONMENT=production`、`DEV_BOOTSTRAP_ENABLED=false`。`SESSION_TOKEN_PEPPER` 或信件密钥丢失会分别使现有会话或密文不可恢复，需按版本化运维流程轮换。
+
+## 持久化与一致性
+
+D1 migrations 按领域拆分为 identity、friendships、visits/actions、account events/idempotency、conversations、letters 和 model inferences。Mutation 使用一个 `DB.batch()` 原子提交：
+
+1. 受版本/transition marker 保护的业务状态；
+2. 每个 recipient 独立的 Account Event；
+3. 请求指纹与首次响应组成的幂等回执。
+
+提交后 Worker best-effort 通知双方账号的 Durable Object。通知失败不回滚业务；客户端最长 60 秒通过 REST 补拉。
+
+同一 operation + `Idempotency-Key` + 同 payload 重放首次结果；同 key 不同 payload 返回 `409 idempotency_key_reused`。D1 partial unique indexes 处理 Host Busy、Visitor Busy、同访客/Host pending 和 action 单次 reply 竞争。
+
+## 安全边界
+
+- D1 只保存 access/refresh token hash，不保存 Bearer Token 明文；refresh rotation 原子撤销旧 session。
+- GitHub Device Flow 遵守 provider interval；每次成功授权都重新请求 GitHub `/user`，以稳定数字 ID 建立 provider identity，GitHub token 不落库。
+- 跨账号资源同时校验当前账号、accepted friendship、目标账号/宠物和资源归属；越权资源统一不可枚举 404。
+- `pet_agent` 写入只允许当前 Primary Agent Device。
+- 信件正文使用 AES-GCM 密文写入 D1；event、日志与 idempotency receipt 都不包含明文。
+- 请求体上限 64 KiB，全部输入使用 strict schema，拒绝未知 action / appearance 字段。
+
+协议以 [`openapi.yaml`](./openapi.yaml) 为准；部署步骤见 [`../Docs/CloudflareDeployment.md`](../Docs/CloudflareDeployment.md)。

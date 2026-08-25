@@ -3,7 +3,7 @@
 set -euo pipefail
 
 project_dir="${0:A:h:h}"
-cache_dir="$project_dir/.cache"
+cache_dir="${MINO_CACHE_DIR:-$project_dir/.cache}"
 
 if (( ! $+commands[npm] )); then
     echo "Required command is unavailable: npm" >&2
@@ -25,3 +25,5 @@ env CLANG_MODULE_CACHE_PATH="$cache_dir/clang" swift test \
 
 npm --prefix "$project_dir/Backend" run typecheck
 npm --prefix "$project_dir/Backend" test
+npm --prefix "$project_dir/Backend" run openapi
+npm --prefix "$project_dir/Backend" run deploy:dry-run

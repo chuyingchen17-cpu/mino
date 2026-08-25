@@ -7,25 +7,16 @@ public struct AppStoragePaths: Equatable, Sendable {
         self.rootDirectory = rootDirectory
     }
 
-    public var coupleSnapshotFile: URL {
-        rootDirectory.appendingPathComponent("couple-snapshot.json", isDirectory: false)
+    public var accountEventCursorFile: URL {
+        rootDirectory.appendingPathComponent("account-event-cursors.json", isDirectory: false)
     }
 
-    public var interactionOutboxFile: URL {
-        rootDirectory.appendingPathComponent("interaction-outbox.json", isDirectory: false)
+    public var socialMutationOutboxFile: URL {
+        rootDirectory.appendingPathComponent("social-mutation-outbox.json", isDirectory: false)
     }
 
     public var personalTimelineFile: URL {
         rootDirectory.appendingPathComponent("personal-timeline.json", isDirectory: false)
-    }
-
-    public var legacyCoupleTimelineFile: URL {
-        rootDirectory.appendingPathComponent("couple-timeline.json", isDirectory: false)
-    }
-
-    @available(*, deprecated, renamed: "personalTimelineFile")
-    public var coupleTimelineFile: URL {
-        personalTimelineFile
     }
 
     public static func live(

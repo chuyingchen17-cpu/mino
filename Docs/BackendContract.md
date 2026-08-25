@@ -1,44 +1,111 @@
-# MVP 后端契约
+# Worker API 契约
 
-机器可读契约以 [`Backend/openapi.yaml`](../Backend/openapi.yaml) 为准。基础路径为 `{baseURL}/v1`，成功信封是 `{"data": ...}`，错误信封是 `{"error":{"code":"...","message":"..."}}`。除健康检查和启用后的开发 bootstrap 外，所有路由都要求 `Authorization: Bearer <token>`。
+机器可读契约以 [`Backend/openapi.yaml`](../Backend/openapi.yaml) 为准。所有时间为 Unix milliseconds。成功信封为 `{"data": ...}`，错误信封为 `{"error":{"code":"...","message":"..."}}`。
 
-## 核心接口
+除 health、GitHub Device Flow、refresh 和启用后的 dev bootstrap 外，所有接口要求 `Authorization: Bearer <accessToken>`。业务 mutation 还要求 UUID `Idempotency-Key` header；command body 不重复传输该 key。
+
+## 路由
 
 | 能力 | 接口 |
 |---|---|
-| 健康与开发身份 | `GET /health`, `POST /dev/bootstrap` |
-| 当前身份与好友 | `GET /me`, `GET/POST /friendships`, `POST /friendships/{id}/respond` |
-| 事件恢复与时间线 | `GET /events?friendshipID=&after=`, `GET /timeline?friendshipID=&after=`, `GET /ws?friendshipID=` |
-| 托管模型代理 | `POST /agent/decision` |
-| 自主对话 | `GET/POST /conversations`, `GET/POST /conversations/{id}/messages`, `POST /conversations/{id}/end` |
-| 串门邀请 | `GET/POST /visit-invitations`, `POST /visit-invitations/{id}/respond` |
-| 来访互动与反应 | `POST /visits/{id}/interactions`, `POST /visits/{id}/reactions` |
-| 信件 | `POST /visits/{id}/letter`, `GET /letters/{letterID}` |
-| 回家 | `POST /visits/{id}/end` |
+| 健康 | `GET /health`, `GET /v1/health` |
+| 会话 | `POST /v1/auth/github/device/start`, `POST /v1/auth/github/device/complete`, `POST /v1/auth/refresh`, `POST /v1/auth/logout` |
+| 本地开发 | `POST /v1/dev/bootstrap` |
+| 当前账号 | `GET /v1/me`, `GET/PATCH /v1/me/profile`, `PATCH /v1/me/pet` |
+| Agent 主设备 | `POST /v1/devices/{deviceID}/claim-agent` |
+| 好友 | `GET/POST /v1/friendships`, `POST /v1/friendships/{id}/respond`, `POST /v1/friendships/{id}/close` |
+| 同步 | `GET /v1/sync/bootstrap`, `GET /v1/events?after=&limit=&timelineVisible=` |
+| 实时提示 | `GET /v1/realtime` WebSocket upgrade |
+| Visit | `GET/POST /v1/visits`, `POST /v1/visits/{id}/respond`, `POST /v1/visits/{id}/end` |
+| Visit Action | `POST /v1/visits/{id}/actions` |
+| 对话 | `GET/POST /v1/conversations`, `GET/POST /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/end` |
+| 信件 | `POST /v1/visits/{id}/letters`, `GET /v1/letters/{letterID}` |
+| 模型 | `POST /v1/agent/decision` |
 
-旧版 presence/interaction 路由保留为迁移兼容入口，新 MVP 以 durable events 与 `MVPVisit` 为准。旧 `POST /pet-visits` 无法表达对方同意，现已在写入前返回 `409 visit_invitation_required`；它不会遗留 pending 串门，调用方必须改用邀请握手。
+## 授权与不可枚举资源
 
-## 隔离与授权
+Bearer token 在服务端解析为可信 `accountID/deviceID/petID/isPrimaryAgentDevice`。客户端不能通过 header、query 或 body 改写这些身份。跨账号命令必须同时满足：
 
-Bearer token 只确定当前个人账号，不能隐式确定某一位好友。所有跨账号路由必须携带 `friendshipID`，服务端同时校验该关系已接受、当前账号是成员、目标账号/宠物属于该关系，以及资源的内部 scope 与该关系一致。不存在、跨好友关系和无权访问的私密资源统一返回不可枚举的 404。为迁移兼容，账号恰好只有一个已接受好友时可以暂时省略 `friendshipID`；拥有零个或多个好友时返回 `409 friendship_context_required`。
+- 当前账号属于目标 Friendship，且状态为 `accepted`；
+- visitor、host、pet 与 friendship 两侧身份严格匹配；
+- Visit/action/conversation/letter 内部 friendship 与账号归属匹配；
+- `actorType=pet_agent` 时设备是当前 Primary Agent Device。
 
-串门响应者由方向决定：`requestedByAccountID` 若是访客主人，则 host 响应；若是 host，则访客主人响应。事件同时携带 `requestedByAccountID` 与 `responderAccountID` 供客户端确定由哪只本地宠物处理。
+不存在与越权资源统一返回 404，避免泄露其它账号资源是否存在。无效输入、未知字段和未知 action 返回 400；请求体超过 64 KiB 返回 413。
 
-## 幂等与恢复
+## 宠物角色永久选择
 
-所有 mutation 携带 UUID `idempotencyKey`，客户端也写 `Idempotency-Key` header。服务端在账号/好友关系和 operation scope 内保存 canonical request fingerprint 与首次回执：
+`PATCH /v1/me/pet` 是首次选择角色及旧账号升级的唯一写入口。协议继续使用 appearance schema 1，并把官方双角色目录固定为 catalog 2：
 
-- 相同 key + 相同 payload：返回首次结果，不重复事件或计费。
-- 相同 key + 不同 payload：`409 idempotency_key_reused`。
+```json
+{
+  "appearanceSchemaVersion": 1,
+  "appearanceCatalogVersion": 2,
+  "appearance": {
+    "rigID": "maltese-pair-v1",
+    "body": "maltese-white"
+  }
+}
+```
 
-事件 ID 是严格 UUID。每个好友关系有独立 cursor；空页保持请求 cursor，格式错误 cursor 返回 400，未知或跨关系 cursor 返回 404。WebSocket 不承担持久化，断线后一律先 REST catch-up。个人事件线由客户端合并所有好友关系中 `timelineVisible` 的事件，好友申请单独从 `/friendships?status=pending` 获取。
+`appearance.body` 只接受 `maltese-white` 或 `retriever-yellow`。所有字段均为 strict；额外字段、其它 rig、其它 catalog 或角色值返回 `400 unsupported_pet_appearance`。稳定 UUID 只放在 `Idempotency-Key` header，不进入 body。
 
-## 模型边界
+写入规则是一次性永久选择：
 
-客户端只提交裁剪后的触发事件、白名单逻辑状态、相关记忆摘要和可用动作。服务端拒绝未知状态字段、伪造的好友/目标宠物身份以及任何信件类上下文，再校验结构化 `PetDecision`；不保存 prompt、原始 provider response 或完整本地记忆，只按账号和 `inferenceID` 保存已验证决定、memory disposition 和 token usage 以支持重放。
+- 当前外观为空或 `rigID = mino-default` 时允许首次写入，不需要 D1 migration；
+- 已选角色与命令相同，返回当前 `PublicPetSnapshot`，不增加 appearance version；
+- 已选角色与命令不同，返回 `409 appearance_locked`；
+- 两台设备并发选择不同角色时，D1 首次成功提交为事实，失败方收到 `appearance_locked`；客户端必须 bootstrap 读取权威角色，不可本地覆盖；
+- 相同 `Idempotency-Key` 与相同 body 重放首次结果；同 key 不同 body 仍返回 `409 idempotency_key_reused`。
 
-非法输出、超时或网络失败不会改变 visit/presence，客户端进入安全 idle。密封文字信正文禁止进入 Agent 请求。
+首次成功会增加 `appearanceVersion`，并发送 timeline-invisible 的 `pet.appearance.updated` 给本人、所有已接受好友和当前来访 Host。事件只包含 `PublicPetSnapshot`，不会发送旧 avatar recipe。`GET /v1/sync/bootstrap`、好友资料和访问中投影均返回同一 schema/catalog/appearance/version；访问中的宠物可原地刷新角色，不重新执行进场。
 
-## 信件
+客户端必须先把选择写入持久 outbox，再立即乐观显示。离线时保留“稍后同步”；重启从 outbox 恢复相同选择。收到成功回执后删除 mutation；收到 `appearance_locked` 后重新 bootstrap，并以服务端角色收敛所有窗口、头像和桌宠。
 
-`letter_attached` 与 `letter_received` 事件只含 ID 和路由元数据。PostgreSQL 与幂等回执中的正文均为 AES-256-GCM 密文；API 只在授权时解密。作者可读取自己的信，收件人仅在 `delivered` 后可读取。MVP 使用 HTTPS/WSS 和服务端加密，不宣称 E2EE。
+## Visit 命令
+
+创建 Visit 的 body 为：
+
+```json
+{
+  "friendshipID": "uuid",
+  "visitorPetID": "pet-id",
+  "hostAccountID": "account-id",
+  "reason": "optional"
+}
+```
+
+若请求者是 visitor owner，则 host 是 responder；若请求者是 host，则 visitor owner 是 responder。只有 responder 能调用 `/respond`。过期 pending 在响应时原子收敛为 `closed/expired`。`/end` 是收敛操作：pending requester 可取消；active visitor owner 可召回；active host 可请回；重复和并发结束返回同一个 closed 事实。
+
+Action 使用 discriminated union。真人允许 `feed/play/pet/hug/kiss/flower/walk/message`；Pet Agent 允许 `reaction/activity/speech/acknowledgement`。真人 Host action 标记 `requiresResponse`，visitor owner 的 Primary Agent 以 `replyToActionID` 回复；数据库保证一个 action 最多一个 reply。
+
+完整状态机见 [`VisitProtocol.md`](VisitProtocol.md)。
+
+## 幂等
+
+幂等 scope 为 `(accountID, operation, Idempotency-Key)`。服务端保存 canonical request fingerprint：
+
+- 同 key + 同 payload：重放首次 HTTP status 与 data，不重复事件、交付或模型计费；
+- 同 key + 不同 payload：`409 idempotency_key_reused`；
+- 并发 transition：只有版本/unique constraint 获胜者写事件和 receipt，失败者返回明确冲突或收敛后的状态。
+
+Refresh Token rotation 使用同一个 D1 atomic batch 插入唯一 replacement 并撤销旧 session；同一 refresh token 的并发请求最多一个成功。
+
+## Account Event
+
+`GET /v1/events?after=<sequence>&limit=1...100` 只返回当前账号事件副本，按 `sequence` 升序。`nextCursor` 为空页时等于输入 cursor。`timelineVisible=true` 只过滤展示事件，不改变账号事实流的含义。
+
+WebSocket 只发：
+
+```json
+{"type":"ready"}
+{"type":"events_available"}
+```
+
+消息不是事实，也不携带 account identity 或业务 payload；任何提示都触发 REST catch-up。
+
+## 模型与信件
+
+模型请求只接受裁剪后的 trigger、白名单 state/memories 和 available actions。`inferenceID` 与请求 fingerprint 绑定，成功结果可重放；prompt、原始 provider response 和完整本地记忆不持久化。信件类字段在 Agent context 中被拒绝。
+
+信件 body 只出现在 attach 请求与授权后的 `GET /letters/{id}` 响应。D1 保存 `ciphertext/iv/key_version`；Account Event 和幂等回执只保存 ID、作者、收件人、Visit 与 delivery status。收件人只有在 Visit 结束且 status 为 `delivered` 后能读取。

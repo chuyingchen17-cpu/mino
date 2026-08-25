@@ -74,16 +74,26 @@ public struct KissInteractionSession: Sendable {
             partner.facing = .left
             mine.activity = .walking
             partner.activity = .walking
+            mine.motionClipOverride = .walk
+            partner.motionClipOverride = .walk
+            mine.motionDurationOverride = nil
+            partner.motionDurationOverride = nil
+            mine.motionPlaybackID = nil
+            partner.motionPlaybackID = nil
 
             guard mineStep.arrived, partnerStep.arrived else {
                 return InteractionAdvance()
             }
 
             phase = .holdingPose
-            mine.activity = .interacting
-            partner.activity = .interacting
+            mine.activity = .celebrating
+            partner.activity = .celebrating
             mine.emotion = .shy
             partner.emotion = .happy
+            mine.motionClipOverride = .cuddleGive
+            partner.motionClipOverride = .cuddleReceive
+            mine.motionDurationOverride = 1.7
+            partner.motionDurationOverride = 1.7
             return InteractionAdvance(cue: .kissHeart(position: effectPosition))
 
         case .holdingPose:
@@ -97,6 +107,12 @@ public struct KissInteractionSession: Sendable {
             partner.activity = .idle
             mine.emotion = .content
             partner.emotion = .content
+            mine.motionClipOverride = nil
+            partner.motionClipOverride = nil
+            mine.motionDurationOverride = nil
+            partner.motionDurationOverride = nil
+            mine.motionPlaybackID = nil
+            partner.motionPlaybackID = nil
             return InteractionAdvance(completed: true)
 
         case .completed:
@@ -161,16 +177,26 @@ public struct FlowerInteractionSession: Sendable {
             partner.facing = .left
             mine.activity = .walking
             partner.activity = .walking
+            mine.motionClipOverride = .walk
+            partner.motionClipOverride = .walk
+            mine.motionDurationOverride = nil
+            partner.motionDurationOverride = nil
+            mine.motionPlaybackID = nil
+            partner.motionPlaybackID = nil
 
             guard mineStep.arrived, partnerStep.arrived else {
                 return InteractionAdvance()
             }
 
             phase = .offering
-            mine.activity = .interacting
-            partner.activity = .interacting
+            mine.activity = .offeringGift
+            partner.activity = .celebrating
             mine.emotion = .happy
             partner.emotion = .shy
+            mine.motionClipOverride = .flowerGive
+            partner.motionClipOverride = .flowerReceive
+            mine.motionDurationOverride = 2.2
+            partner.motionDurationOverride = 2.2
             return InteractionAdvance(cue: .flowerGift(position: effectPosition))
 
         case .offering:
@@ -184,6 +210,12 @@ public struct FlowerInteractionSession: Sendable {
             partner.activity = .idle
             mine.emotion = .content
             partner.emotion = .happy
+            mine.motionClipOverride = nil
+            partner.motionClipOverride = nil
+            mine.motionDurationOverride = nil
+            partner.motionDurationOverride = nil
+            mine.motionPlaybackID = nil
+            partner.motionPlaybackID = nil
             return InteractionAdvance(completed: true)
 
         case .completed:

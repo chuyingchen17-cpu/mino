@@ -1,19 +1,20 @@
-import { createHash, createHmac, type BinaryLike, type KeyObject } from "node:crypto";
+import { base64URL } from "./tokens";
 
-function canonicalJSON(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJSON).join(",")}]`;
-  const object = value as Record<string, unknown>;
-  return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalJSON(object[key])}`).join(",")}}`;
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, child]) => child !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, canonicalize(child)])
+    );
+  }
+  return value;
 }
 
-export function requestFingerprint(value: unknown): string {
-  return createHash("sha256").update(canonicalJSON(value), "utf8").digest("hex");
-}
-
-export function keyedRequestFingerprint(value: unknown, key: BinaryLike | KeyObject): string {
-  return `hmac-sha256:${createHmac("sha256", key)
-    .update("mino-request-fingerprint-v1\0", "utf8")
-    .update(canonicalJSON(value), "utf8")
-    .digest("hex")}`;
+export async function requestFingerprint(value: unknown): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(canonicalize(value)));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return base64URL(new Uint8Array(digest));
 }

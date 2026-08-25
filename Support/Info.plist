@@ -8,6 +8,8 @@
 	<string>Mino</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.mino.app</string>
+	<key>CFBundleIconFile</key>
+	<string>Mino</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -27,9 +29,9 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>MinoBackendMode</key>
-	<string>offline</string>
+	<string>remote</string>
 	<key>MinoAPIBaseURL</key>
-	<string></string>
+	<string>https://api.mino.pet</string>
 	<key>MinoAPIVersion</key>
 	<string>v1</string>
 	<key>MinoRequestTimeout</key>

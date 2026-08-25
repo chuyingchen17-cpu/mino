@@ -1,80 +1,49 @@
 import Foundation
 import Testing
-
 @testable import MinoDomain
 
 @Test
-func socialWireModelsDecodeBackendConversationAndVisit() throws {
+func socialWireModelsDecodeWorkerConversationAndMessage() throws {
     let decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .iso8601
-    let conversationData = Data(
-        #"{"id":"conversation_1","coupleID":"couple_1","initiatorPetID":"pet_alice","recipientPetID":"pet_bob","status":"active","nextSpeakerPetID":"pet_bob","turnCount":1,"createdAt":"2026-08-15T12:00:00Z","endedAt":null}"#.utf8
-    )
-    let visitData = Data(
-        #"{"id":"visit_1","coupleID":"couple_1","visitorPetID":"pet_bob","visitorOwnerAccountID":"account_bob","hostAccountID":"account_alice","requestedByAccountID":"account_alice","reason":"来玩吧","status":"active","createdAt":"2026-08-15T12:00:00Z","startedAt":"2026-08-15T12:01:00Z","endedAt":null}"#.utf8
-    )
+    decoder.dateDecodingStrategy = .millisecondsSince1970
+    let conversation = try decoder.decode(PetConversation.self, from: Data("""
+    {"id":"conversation_1","friendshipID":"friendship_1","initiatorPetID":"pet_alice","recipientPetID":"pet_bob","status":"active","nextSpeakerPetID":"pet_bob","turnCount":1,"version":1,"createdAt":1000,"endedAt":null}
+    """.utf8))
+    let message = try decoder.decode(PetConversationMessage.self, from: Data("""
+    {"id":"message_1","conversationID":"conversation_1","senderAccountID":"account_alice","actorType":"pet_agent","body":"你好","turnIndex":0,"createdAt":1000}
+    """.utf8))
 
-    let conversation = try decoder.decode(PetConversation.self, from: conversationData)
-    let visit = try decoder.decode(MVPVisit.self, from: visitData)
-
+    #expect(conversation.version == 1)
     #expect(conversation.nextSpeakerPetID == PetProfileID(rawValue: "pet_bob"))
-    #expect(conversation.turnCount == 1)
-    #expect(visit.status == .active)
-    #expect(visit.visitorOwnerAccountID == AccountID(rawValue: "account_bob"))
+    #expect(message.actorType == .petAgent)
+    #expect(message.body == "你好")
 }
 
 @Test
-func durableEventPayloadIsForwardCompatibleAndKeepsLetterBodyAbsent() throws {
+func accountLetterEventNeverCarriesPlaintext() throws {
     let decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .iso8601
-    let data = Data(
-        #"{"id":"event_9","sequence":9,"coupleID":"couple_1","type":"letter_received","actorType":"system","actorID":null,"payload":{"letterID":"letter_1","visitID":"visit_1","futureField":true},"timelineVisible":true,"occurredAt":"2026-08-15T12:02:00Z"}"#.utf8
-    )
+    decoder.dateDecodingStrategy = .millisecondsSince1970
+    let event = try decoder.decode(AccountEvent.self, from: Data("""
+    {"sequence":8,"id":"event_8","schemaVersion":1,"recipientAccountID":"account_alice","friendshipID":"friendship_1","type":"letter.delivered","aggregateType":"letter","aggregateID":"letter_1","aggregateVersion":null,"payload":{"letterID":"letter_1","visitID":"visit_1","futureField":true},"timelineVisible":true,"occurredAt":1000}
+    """.utf8))
 
-    let event = try decoder.decode(FriendshipEvent.self, from: data)
-
-    #expect(event.payload["letterID"]?.stringValue == "letter_1")
     #expect(event.payload["body"] == nil)
     #expect(event.payload["futureField"] == .bool(true))
-    let timeline = try #require(event.timelineEvent())
-    #expect(timeline.kind == .letterReceived)
-    #expect(timeline.letterID == LetterID(rawValue: "letter_1"))
+    #expect(event.timelineEvent()?.letterID == LetterID(rawValue: "letter_1"))
 }
 
 @Test
-func conversationSummaryMapsToEventLineWithoutDuration() {
-    let event = FriendshipEvent(
-        id: "event_10",
-        sequence: 10,
-        friendshipID: FriendshipID(rawValue: "friendship_1"),
-        type: "conversation_summary",
-        actorType: .pet,
-        actorID: "pet_alice",
-        payload: .object([
-            "conversationID": .string("conversation_1"),
-            "summary": .string("奶糖和团子约好下次一起晒太阳")
-        ]),
-        timelineVisible: true,
-        occurredAt: Date(timeIntervalSince1970: 100)
-    )
+func visitCloseBecomesOneAggregatedInteractionTimelineEvent() throws {
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .millisecondsSince1970
+    let event = try decoder.decode(AccountEvent.self, from: Data("""
+    {"sequence":9,"id":"event_9","schemaVersion":1,"recipientAccountID":"account_alice","friendshipID":"friendship_1","type":"visit.closed","aggregateType":"visit","aggregateID":"visit_1","aggregateVersion":3,"payload":{"visit":{"id":"visit_1","visitorPetID":"pet_bob"},"interactionSummary":{"counts":{"feed":2,"cuddle":1},"familiarityGained":3,"letterAttached":true}},"timelineVisible":true,"occurredAt":1000}
+    """.utf8))
 
     let timeline = event.timelineEvent()
-
-    #expect(timeline?.kind == .conversationSummary)
-    #expect(timeline?.summary == "奶糖和团子约好下次一起晒太阳")
-    #expect(timeline?.occurredAt == Date(timeIntervalSince1970: 100))
-}
-
-@Test
-func developmentProfileCarriesOnlyTheLocalIdentity() throws {
-    let decoder = JSONDecoder()
-    let data = Data(
-        #"{"profile":"alice","token":"dev-token","accountID":"account_alice","petID":"pet_alice","accountName":"Alice","petName":"奶糖","friends":[{"friendshipID":"friendship_1","accountID":"account_bob","petID":"pet_bob","accountName":"Bob","petName":"团子"}]}"#.utf8
-    )
-
-    let profile = try decoder.decode(DevBootstrapProfile.self, from: data)
-
-    #expect(profile.petName == "奶糖")
-    #expect(profile.accountID == AccountID(rawValue: "account_alice"))
-    #expect(!String(decoding: data, as: UTF8.self).contains("coordinate"))
+    #expect(timeline?.kind == .visitReturned)
+    #expect(timeline?.visitInteractionSummary?.counts[.feed] == 2)
+    #expect(timeline?.visitInteractionSummary?.counts[.cuddle] == 1)
+    #expect(timeline?.visitInteractionSummary?.familiarityGained == 3)
+    #expect(timeline?.visitInteractionSummary?.letterAttached == true)
 }

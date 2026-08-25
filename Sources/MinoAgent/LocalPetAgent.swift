@@ -74,6 +74,16 @@ public actor LocalPetAgent {
         )
     }
 
+    public func updateDisplayName(_ displayName: String) {
+        identity = AgentIdentity(
+            petID: identity.petID,
+            ownerAccountID: identity.ownerAccountID,
+            displayName: displayName,
+            friends: identity.friends,
+            localeIdentifier: identity.localeIdentifier
+        )
+    }
+
     /// Submits an observation in FIFO order. Duplicate IDs share the in-flight or cached result.
     public func submit(_ observation: AgentObservation) async -> AgentTurnResult {
         if let completed = completedResults[observation.id] {

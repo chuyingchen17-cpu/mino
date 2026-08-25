@@ -4,23 +4,16 @@ import SpriteKit
 
 @MainActor
 final class PetScene: SKScene {
-    private let root = SKNode()
+    /// `avatar` is itself the world anchor and owns only a fixed shadow plus a
+    /// pose-only body container. The scene never adds a second hop/bounce owner.
     private let avatar = PetAvatarNode()
-    private let shadow = SKShapeNode(ellipseOf: CGSize(width: 74, height: 15))
     private let nameBadge = SKShapeNode(rectOf: CGSize(width: 78, height: 25), cornerRadius: 12.5)
     private let nameLabel = SKLabelNode()
-    private var lastActivity: PetActivity?
 
     override init(size: CGSize) {
         super.init(size: size)
         scaleMode = .resizeFill
         backgroundColor = .clear
-
-        shadow.fillColor = NSColor.black.withAlphaComponent(0.16)
-        shadow.strokeColor = .clear
-        shadow.position = CGPoint(x: size.width / 2, y: 49)
-        shadow.zPosition = -10
-        addChild(shadow)
 
         nameBadge.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.88)
         nameBadge.strokeColor = NSColor.white.withAlphaComponent(0.85)
@@ -37,63 +30,117 @@ final class PetScene: SKScene {
         nameLabel.zPosition = 101
         addChild(nameLabel)
 
-        root.position = restingPosition
-        addChild(root)
-        root.addChild(avatar)
+        avatar.position = restingPosition
+        addChild(avatar)
     }
 
     required init?(coder aDecoder: NSCoder) {
         nil
     }
 
-    func render(_ state: PetRuntimeState) {
-        avatar.apply(state.avatar, emotion: state.emotion)
-        avatar.setFacing(state.facing)
+    override func didChangeSize(_ oldSize: CGSize) {
+        super.didChangeSize(oldSize)
+        avatar.position = restingPosition
+        nameBadge.position = CGPoint(x: size.width / 2, y: 18)
+        nameLabel.position = nameBadge.position
+    }
+
+    func render(
+        _ state: PetRuntimeState,
+        reactionPlan: PetReactionPlan? = nil,
+        clipOverride: PetMotionClipID? = nil,
+        reduceMotion: Bool? = nil,
+        motionProgress: Double? = nil
+    ) {
+        let clip = clipOverride
+            ?? state.motionClipOverride
+            ?? reactionPlan?.motionClip
+            ?? reactionPlan.map { PetMotionResolver.resolve(activity: $0.activity, emotion: $0.emotion) }
+            ?? PetMotionResolver.resolve(activity: state.activity, emotion: state.emotion)
+        avatar.apply(
+            characterID: state.characterID,
+            clip: clip,
+            facing: state.facing,
+            duration: reactionPlan?.duration ?? state.motionDurationOverride,
+            playbackID: state.motionPlaybackID,
+            reduceMotion: reduceMotion,
+            motionProgress: motionProgress
+        )
         nameLabel.text = state.id == .mine
             ? "\(state.displayName)  ·  我"
             : "\(state.displayName)  ·  TA"
-
-        guard lastActivity != state.activity else { return }
-        lastActivity = state.activity
-        root.removeAction(forKey: "activity")
-        root.position = restingPosition
-        root.xScale = 1
-        root.yScale = 1
-        shadow.removeAction(forKey: "activity")
-        shadow.xScale = 1
-        shadow.yScale = 1
-
-        switch state.activity {
-        case .idle:
-            let breathe = SKAction.sequence([
-                .scaleY(to: 1.035, duration: 0.9),
-                .scaleY(to: 1, duration: 0.9)
-            ])
-            breathe.timingMode = .easeInEaseOut
-            root.run(.repeatForever(breathe), withKey: "activity")
-        case .walking:
-            let hop = SKAction.sequence([
-                .moveBy(x: 0, y: 5, duration: 0.16),
-                .moveBy(x: 0, y: -5, duration: 0.16)
-            ])
-            root.run(.repeatForever(hop), withKey: "activity")
-            let shadowPulse = SKAction.sequence([
-                .scaleX(to: 0.84, duration: 0.16),
-                .scaleX(to: 1, duration: 0.16)
-            ])
-            shadow.run(.repeatForever(shadowPulse), withKey: "activity")
-        case .interacting:
-            root.run(.scale(to: 1.06, duration: 0.18), withKey: "activity")
-        }
     }
 
-    func reactToClick() {
-        let pulse = SKAction.sequence([
-            .scale(to: 1.12, duration: 0.1),
-            .scale(to: 1, duration: 0.16)
-        ])
-        root.run(pulse, withKey: "click")
+    /// Explicit interaction choreography for paired giver/receiver actions.
+    func renderInteraction(
+        _ state: PetRuntimeState,
+        kind: PetCareInteractionKind,
+        outcome: PetInteractionOutcome = .applied,
+        role: PetMotionRole = .single,
+        duration: TimeInterval,
+        reduceMotion: Bool? = nil,
+        motionProgress: Double? = nil
+    ) {
+        let clip = PetMotionResolver.resolve(
+            activity: state.activity,
+            emotion: state.emotion,
+            interaction: kind,
+            outcome: outcome,
+            role: role
+        )
+        avatar.apply(
+            characterID: state.characterID,
+            clip: clip,
+            facing: state.facing,
+            duration: duration,
+            playbackID: state.motionPlaybackID,
+            reduceMotion: reduceMotion,
+            motionProgress: motionProgress
+        )
     }
+
+    /// Explicit visit sequence: walkingIn -> welcome -> active -> waveGoodbye
+    /// -> walkingOut. Position still belongs to the runtime/world anchor.
+    func renderVisit(
+        _ state: PetRuntimeState,
+        phase: PetVisitMotionPhase,
+        duration: TimeInterval,
+        reduceMotion: Bool? = nil,
+        motionProgress: Double? = nil
+    ) {
+        let clip = PetMotionResolver.resolve(
+            activity: state.activity,
+            emotion: state.emotion,
+            visitPhase: phase
+        )
+        avatar.apply(
+            characterID: state.characterID,
+            clip: clip,
+            facing: state.facing,
+            duration: duration,
+            playbackID: state.motionPlaybackID,
+            reduceMotion: reduceMotion,
+            motionProgress: motionProgress
+        )
+    }
+
+    func reactToClick(reduceMotion: Bool? = nil) {
+        avatar.playImmediatePetReceive(
+            duration: 0.72,
+            reduceMotion: reduceMotion
+        )
+    }
+
+    var renderedClipForTesting: PetMotionClipID? { avatar.currentClip }
+    var worldAnchorPositionForTesting: CGPoint { avatar.position }
+    var shadowPositionForTesting: CGPoint { avatar.shadowNode.position }
+    var bodyContainerPositionForTesting: CGPoint { avatar.bodyContainer.position }
+    var motionStartCountForTesting: Int { avatar.motionStartCount }
+    var lastMotionDurationForTesting: TimeInterval? { avatar.lastRequestedDuration }
+    var playbackIDForTesting: UUID? { avatar.currentPlaybackIDForTesting }
+    var currentTextureForTesting: SKTexture? { avatar.currentTextureForTesting }
+    var hasActiveFrameMotionForTesting: Bool { avatar.hasActiveFrameMotionForTesting }
+    var frameSpritePositionForTesting: CGPoint? { avatar.frameSpritePositionForTesting }
 
     private var restingPosition: CGPoint {
         CGPoint(x: size.width / 2, y: 94)

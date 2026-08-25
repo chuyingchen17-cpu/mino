@@ -1,0 +1,81 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mino-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ENVIRONMENT": "development",
+    "DEV_BOOTSTRAP_ENABLED": "true",
+    "GITHUB_CLIENT_ID": "Ov23liZNdBaSHLQpJkIn",
+    "MODEL_PROVIDER_BASE_URL": "https://api.openai.com/v1",
+    "MODEL_NAME": "gpt-5-mini"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mino-local",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "ACCOUNT_REALTIME", "class_name": "AccountRealtimeHub" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AccountRealtimeHub"] }
+  ],
+  "env": {
+    "staging": {
+      "name": "mino-worker-staging",
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "DEV_BOOTSTRAP_ENABLED": "false",
+        "GITHUB_CLIENT_ID": "Ov23liZNdBaSHLQpJkIn",
+        "MODEL_PROVIDER_BASE_URL": "https://api.openai.com/v1",
+        "MODEL_NAME": "gpt-5-mini"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mino-staging",
+          "database_id": "REPLACE_WITH_STAGING_D1_ID",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          { "name": "ACCOUNT_REALTIME", "class_name": "AccountRealtimeHub" }
+        ]
+      }
+    },
+    "production": {
+      "name": "mino-worker-production",
+      "routes": [
+        { "pattern": "api.mino.pet", "custom_domain": true }
+      ],
+      "vars": {
+        "ENVIRONMENT": "production",
+        "DEV_BOOTSTRAP_ENABLED": "false",
+        "GITHUB_CLIENT_ID": "Ov23liZNdBaSHLQpJkIn",
+        "MODEL_PROVIDER_BASE_URL": "https://api.openai.com/v1",
+        "MODEL_NAME": "gpt-5-mini"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mino-production",
+          "database_id": "478eebcc-37fb-4109-a59c-c7fe84e540bd",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          { "name": "ACCOUNT_REALTIME", "class_name": "AccountRealtimeHub" }
+        ]
+      }
+    }
+  }
+}

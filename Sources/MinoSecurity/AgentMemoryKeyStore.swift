@@ -1,15 +1,21 @@
 import CryptoKit
+import Darwin
 import Foundation
 import Security
 
-public protocol AgentMemoryKeyStore: Sendable {
+public protocol LocalSecretKeyProvider: Sendable {
     func loadOrCreateKey() async throws -> SymmetricKey
 }
 
+public protocol AgentMemoryKeyStore: LocalSecretKeyProvider {}
+
 public enum AgentMemoryKeyStoreError: Error, Equatable, Sendable {
     case invalidNamespace(String)
+    case invalidExecutableFingerprint
     case randomGenerationFailed(Int32)
     case operationFailed(operation: String, status: Int32)
+    case fileOperationFailed(operation: String, code: Int)
+    case unsafeStorageLayout
     case invalidKey
 }
 
@@ -19,16 +25,34 @@ public actor KeychainAgentMemoryKeyStore: AgentMemoryKeyStore {
     private let service: String
     private let account = "primary"
 
-    public init(namespace: String = "") throws {
-        service = try Self.serviceName(for: namespace)
+    public init(
+        namespace: String = "",
+        executableFingerprint: Data? = nil
+    ) throws {
+        service = try Self.serviceName(
+            for: namespace,
+            executableFingerprint: executableFingerprint
+        )
     }
 
-    package static func serviceName(for namespace: String) throws -> String {
+    package static func serviceName(
+        for namespace: String,
+        executableFingerprint: Data? = nil
+    ) throws -> String {
         guard Self.isValidNamespace(namespace) else {
             throw AgentMemoryKeyStoreError.invalidNamespace(namespace)
         }
-        guard !namespace.isEmpty else { return defaultService }
-        return "\(defaultService).profile.\(namespace)"
+        let baseService = namespace.isEmpty
+            ? defaultService
+            : "\(defaultService).profile.\(namespace)"
+        guard let executableFingerprint else { return baseService }
+        guard !executableFingerprint.isEmpty else {
+            throw AgentMemoryKeyStoreError.invalidExecutableFingerprint
+        }
+        let fingerprint = executableFingerprint.prefix(20).map {
+            String(format: "%02x", $0)
+        }.joined()
+        return "\(baseService).executable.\(fingerprint)"
     }
 
     public func loadOrCreateKey() async throws -> SymmetricKey {
@@ -88,6 +112,151 @@ public actor KeychainAgentMemoryKeyStore: AgentMemoryKeyStore {
             default: false
             }
         }
+    }
+}
+
+/// Persists a device-local 256-bit secret without depending on Keychain ACLs.
+/// The containing directory is private to the current user and writes never
+/// expose a partially written key at the final path.
+public actor FileAgentMemoryKeyStore: AgentMemoryKeyStore {
+    private let fileURL: URL
+    private let fileManager: FileManager
+
+    public init(fileURL: URL, fileManager: FileManager = .default) {
+        self.fileURL = fileURL.standardizedFileURL
+        self.fileManager = fileManager
+    }
+
+    public func loadOrCreateKey() async throws -> SymmetricKey {
+        try ensurePrivateParentDirectory()
+        if fileManager.fileExists(atPath: fileURL.path) {
+            return SymmetricKey(data: try loadKeyData())
+        }
+
+        let data = try generateKeyData()
+        if try installKeyDataAtomically(data) {
+            return SymmetricKey(data: data)
+        }
+        // A second process won the exclusive rename. Its complete key is now
+        // authoritative; the losing process never replaces it.
+        return SymmetricKey(data: try loadKeyData())
+    }
+
+    private func ensurePrivateParentDirectory() throws {
+        guard fileURL.isFileURL, !fileURL.lastPathComponent.isEmpty else {
+            throw AgentMemoryKeyStoreError.unsafeStorageLayout
+        }
+        let directoryURL = fileURL.deletingLastPathComponent()
+        if fileManager.fileExists(atPath: directoryURL.path) {
+            let attributes: [FileAttributeKey: Any]
+            do {
+                attributes = try fileManager.attributesOfItem(atPath: directoryURL.path)
+            } catch {
+                throw fileError(operation: "inspect-directory", error: error)
+            }
+            guard attributes[.type] as? FileAttributeType == .typeDirectory else {
+                throw AgentMemoryKeyStoreError.unsafeStorageLayout
+            }
+        } else {
+            do {
+                try fileManager.createDirectory(
+                    at: directoryURL,
+                    withIntermediateDirectories: true,
+                    attributes: [.posixPermissions: NSNumber(value: 0o700)]
+                )
+            } catch {
+                throw fileError(operation: "create-directory", error: error)
+            }
+        }
+        do {
+            try fileManager.setAttributes(
+                [.posixPermissions: NSNumber(value: 0o700)],
+                ofItemAtPath: directoryURL.path
+            )
+        } catch {
+            throw fileError(operation: "set-directory-permissions", error: error)
+        }
+    }
+
+    private func loadKeyData() throws -> Data {
+        let attributes: [FileAttributeKey: Any]
+        do {
+            attributes = try fileManager.attributesOfItem(atPath: fileURL.path)
+        } catch {
+            throw fileError(operation: "inspect-key", error: error)
+        }
+        guard attributes[.type] as? FileAttributeType == .typeRegular else {
+            throw AgentMemoryKeyStoreError.unsafeStorageLayout
+        }
+        do {
+            try fileManager.setAttributes(
+                [.posixPermissions: NSNumber(value: 0o600)],
+                ofItemAtPath: fileURL.path
+            )
+        } catch {
+            throw fileError(operation: "set-file-permissions", error: error)
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch {
+            throw fileError(operation: "read", error: error)
+        }
+        guard data.count == 32 else {
+            throw AgentMemoryKeyStoreError.invalidKey
+        }
+        return data
+    }
+
+    private func generateKeyData() throws -> Data {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            throw AgentMemoryKeyStoreError.randomGenerationFailed(status)
+        }
+        return Data(bytes)
+    }
+
+    private func installKeyDataAtomically(_ data: Data) throws -> Bool {
+        let temporaryURL = fileURL.deletingLastPathComponent().appendingPathComponent(
+            ".\(fileURL.lastPathComponent).\(UUID().uuidString).tmp",
+            isDirectory: false
+        )
+        defer { try? fileManager.removeItem(at: temporaryURL) }
+        do {
+            try data.write(to: temporaryURL, options: .withoutOverwriting)
+            try fileManager.setAttributes(
+                [.posixPermissions: NSNumber(value: 0o600)],
+                ofItemAtPath: temporaryURL.path
+            )
+        } catch {
+            throw fileError(operation: "write-temporary", error: error)
+        }
+
+        let renameStatus: Int32 = temporaryURL.withUnsafeFileSystemRepresentation { source in
+            guard let source else { return -1 }
+            return fileURL.withUnsafeFileSystemRepresentation { destination in
+                guard let destination else { return -1 }
+                return renamex_np(source, destination, UInt32(RENAME_EXCL))
+            }
+        }
+        guard renameStatus == 0 else {
+            let code = errno
+            if code == EEXIST { return false }
+            throw AgentMemoryKeyStoreError.fileOperationFailed(
+                operation: "install-key",
+                code: Int(code == 0 ? EINVAL : code)
+            )
+        }
+        return true
+    }
+
+    private func fileError(operation: String, error: Error) -> AgentMemoryKeyStoreError {
+        AgentMemoryKeyStoreError.fileOperationFailed(
+            operation: operation,
+            code: (error as NSError).code
+        )
     }
 }
 

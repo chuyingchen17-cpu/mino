@@ -24,8 +24,14 @@ let package = Package(
             name: "MinoPresentation",
             dependencies: ["MinoDomain"],
             path: "Sources/MinoPresentation",
+            exclude: [
+                "Resources/partner-avatar.png",
+                "Resources/shared-room-away.png",
+                "Resources/shared-room.png",
+                "Resources/Pets"
+            ],
             resources: [
-                .process("Resources")
+                .copy("Resources/PetFrames")
             ]
         ),
         .target(
@@ -75,6 +81,11 @@ let package = Package(
             path: "Tests/MinoRuntimeTests"
         ),
         .testTarget(
+            name: "MinoPresentationTests",
+            dependencies: ["MinoDomain", "MinoPresentation"],
+            path: "Tests/MinoPresentationTests"
+        ),
+        .testTarget(
             name: "MinoInfrastructureTests",
             dependencies: ["MinoDomain", "MinoInfrastructure"],
             path: "Tests/MinoInfrastructureTests"
@@ -93,6 +104,11 @@ let package = Package(
             name: "MinoAgentTests",
             dependencies: ["MinoDomain", "MinoAgent"],
             path: "Tests/MinoAgentTests"
+        ),
+        .testTarget(
+            name: "MinoAppTests",
+            dependencies: ["MinoApp", "MinoDomain", "MinoInfrastructure"],
+            path: "Tests/MinoAppTests"
         )
     ]
 )

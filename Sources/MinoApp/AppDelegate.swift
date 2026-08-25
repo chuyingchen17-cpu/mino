@@ -13,27 +13,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var world: PetWorld?
     private var petWindows: [PetID: PetWindowController] = [:]
     private var sharedSpaceWindow: SharedSpaceWindowController?
+    private var visitInvitationWindow: VisitInvitationWindowController?
     private let effectWindows = EffectWindowController()
-    private let demoSequence = DemoSequenceController()
     private var statusItem: NSStatusItem?
     private var visitMenuItem: NSMenuItem?
+    private var identityMenuItem: NSMenuItem?
+    private var ownPetOperationsItem: NSMenuItem?
+    private var visitingPetOperationsItem: NSMenuItem?
     private var backendHealthTask: Task<Void, Never>?
     private var localStateBootstrapTask: Task<Void, Never>?
     private var visitTransitionTask: Task<Void, Never>?
     private var socialBootstrapTask: Task<Void, Never>?
-    private var agentWakeTask: Task<Void, Never>?
-    private var eventSyncCoordinators: [FriendshipID: EventSyncCoordinator] = [:]
+    private var githubSignInTask: Task<Void, Never>?
+    private var socialOutboxRetryTask: Task<Void, Never>?
+    private var ownerMessageDebounceTask: Task<Void, Never>?
+    private var accountEventSyncCoordinator: AccountEventSyncCoordinator?
+    private var visitProjectionReducer: VisitProjectionReducer?
     private var conversationCoordinator: ConversationCoordinator?
     private var socialVisitCoordinator: VisitCoordinator?
     private var agentCoordinator: AgentCoordinator?
     private var agentMemoryStore: (any AgentMemoryStore)?
+    private var isPrimaryAgentDevice = false
+    private let localInteractionRouter = LocalInteractionRouter()
     private var developmentProfile: DevBootstrapProfile?
-    private var activeIncomingVisit: MVPVisit?
-    private var activeOutgoingVisit: MVPVisit?
+    private var activeIncomingVisit: Visit?
+    private var activeOutgoingVisit: Visit?
+    private var pendingVisits: [PetVisitID: Visit] = [:]
+    private var optimisticallyReturningVisitIDs: Set<PetVisitID> = []
+    private var departingOwnPetVisitID: PetVisitID?
     private var pendingLetterDraft: String?
+    private var currentProfile: CurrentProfile
+    private let interactionResponseProvider = DeterministicInteractionResponseProvider()
+    private var careStates: [PetID: PetCareState] = [
+        .mine: PetCareState(),
+        .partner: PetCareState()
+    ]
+    private var familiarities: [FriendshipID: PetFamiliarity] = [:]
+    private var recentCareInteractions: [PetID: (kind: PetCareInteractionKind, at: Date, count: Int)] = [:]
+    private var recentRestAt: [PetID: Date] = [:]
+    private var announcedIncomingVisitID: PetVisitID?
 
     init(services: ServiceContainer) {
         self.services = services
+        currentProfile = LocalProfilePreferences.load(
+            for: services.configuration.clientProfile
+        ) ?? Self.defaultProfile(for: services.configuration.clientProfile)
         super.init()
     }
 
@@ -56,7 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 facing: .right,
                 activity: .idle,
                 emotion: .content,
-                avatar: runtimeIdentity.localAvatar
+                avatar: runtimeIdentity.localAvatar,
+                characterID: runtimeDefaultCharacter
             )
         ]
 
@@ -70,13 +95,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         petWindows[.mine] = PetWindowController(
             id: .mine,
             displayName: runtimeIdentity.localPetName,
-            onMoved: { [weak self, weak world] position in
-                self?.demoSequence.stop()
+            onMoved: { [weak world] position in
                 world?.movePet(.mine, to: position)
             },
-            onClicked: { [weak self, weak world] in
-                self?.demoSequence.stop()
-                world?.triggerKiss()
+            onClicked: { [weak self] in
+                self?.handlePetTouch(for: .mine)
             },
             onHoverChanged: { [weak world] isHovering in
                 world?.setPetHovering(.mine, isHovering: isHovering)
@@ -90,13 +113,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         petWindows[.partner] = PetWindowController(
             id: .partner,
             displayName: runtimeIdentity.fallbackFriendPetName,
-            onMoved: { [weak self, weak world] position in
-                self?.demoSequence.stop()
+            onMoved: { [weak world] position in
                 world?.movePet(.partner, to: position)
             },
-            onClicked: { [weak self, weak world] in
-                self?.demoSequence.stop()
-                world?.triggerKiss()
+            onClicked: { [weak self] in
+                self?.handlePetTouch(for: .partner)
             },
             onHoverChanged: { [weak world] isHovering in
                 world?.setPetHovering(.partner, isHovering: isHovering)
@@ -116,21 +137,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.petWindows[id]?.hide()
                 }
             }
-            if self.isSocialMVPConfigured {
-                if self.activeIncomingVisit?.status == .active {
-                    self.visitMenuItem?.title = "请来访宠物回家"
-                } else if self.activeOutgoingVisit?.status == .active {
-                    self.visitMenuItem?.title = "喊\(runtimeIdentity.localPetName)回家"
-                } else if self.activeIncomingVisit != nil || self.activeOutgoingVisit != nil {
-                    self.visitMenuItem?.title = "串门提议正在处理中"
-                } else {
-                    self.visitMenuItem?.title = "选择好友串门"
-                }
+            if self.activeIncomingVisit?.status == .active {
+                self.visitMenuItem?.title = "请来访宠物回家"
+            } else if self.activeOutgoingVisit?.status == .active {
+                self.visitMenuItem?.title = "喊\(runtimeIdentity.localPetName)回家"
+            } else if !self.pendingVisits.isEmpty {
+                self.visitMenuItem?.title = "串门提议正在处理中"
             } else {
-                self.visitMenuItem?.title = states[.partner] == nil
-                    ? "模拟\(runtimeIdentity.fallbackFriendPetName)来串门"
-                    : "让\(runtimeIdentity.fallbackFriendPetName)回家"
+                self.visitMenuItem?.title = "选择好友串门"
             }
+            self.refreshPetOperationsMenus()
         }
         world.onInteractionCue = { [weak self] cue in
             switch cue {
@@ -144,11 +160,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.world = world
         world.start()
         setupSharedSpaceWindow()
+        setupVisitInvitationWindow()
         setupStatusItem()
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screenConfigurationChanged),
             name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemDidWake),
+            name: NSWorkspace.didWakeNotification,
             object: nil
         )
         bootstrapLocalState()
@@ -161,11 +184,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         backendHealthTask?.cancel()
         visitTransitionTask?.cancel()
         socialBootstrapTask?.cancel()
-        agentWakeTask?.cancel()
-        eventSyncCoordinators.values.forEach { $0.stop() }
-        demoSequence.stop()
+        githubSignInTask?.cancel()
+        socialOutboxRetryTask?.cancel()
+        ownerMessageDebounceTask?.cancel()
+        accountEventSyncCoordinator?.stop()
+        visitInvitationWindow?.dismissAll()
         world?.stop()
         NotificationCenter.default.removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         MinoLog.lifecycle.info("Mino terminated")
     }
 
@@ -193,55 +219,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         identityItem.isEnabled = false
         menu.addItem(identityItem)
+        identityMenuItem = identityItem
 
         let openItem = NSMenuItem(title: "打开好友与事件", action: #selector(openSharedSpace), keyEquivalent: "o")
         openItem.target = self
         menu.addItem(openItem)
         menu.addItem(.separator())
 
-        if !isSocialMVPConfigured {
-            let demoItem = NSMenuItem(
-                title: "播放完整 Demo",
-                action: #selector(playDemo),
-                keyEquivalent: "d"
-            )
-            demoItem.target = self
-            menu.addItem(demoItem)
-        }
-
-        let visitItem = NSMenuItem(
-            title: isSocialMVPConfigured
-                ? "选择好友串门"
-                : "模拟\(runtimeIdentity.fallbackFriendPetName)来串门",
-            action: #selector(togglePartnerVisit),
-            keyEquivalent: "v"
-        )
-        visitItem.target = self
-        menu.addItem(visitItem)
-        visitMenuItem = visitItem
+        let ownPetOperationsItem = makePetOperationsItem(for: .mine)
+        menu.addItem(ownPetOperationsItem)
+        self.ownPetOperationsItem = ownPetOperationsItem
+        let visitingPetOperationsItem = makePetOperationsItem(for: .partner)
+        visitingPetOperationsItem.isEnabled = false
+        menu.addItem(visitingPetOperationsItem)
+        self.visitingPetOperationsItem = visitingPetOperationsItem
         menu.addItem(.separator())
 
-        let kissItem = NSMenuItem(title: "亲亲", action: #selector(kissPets), keyEquivalent: "k")
-        kissItem.target = self
-        menu.addItem(kissItem)
+        if isSocialMVPConfigured {
+            let visitItem = NSMenuItem(
+                title: "选择好友串门",
+                action: #selector(togglePartnerVisit),
+                keyEquivalent: "v"
+            )
+            visitItem.target = self
+            menu.addItem(visitItem)
+            visitMenuItem = visitItem
+            menu.addItem(.separator())
+        }
 
-        let flowerItem = NSMenuItem(title: "送花", action: #selector(giveFlower), keyEquivalent: "f")
-        flowerItem.target = self
-        menu.addItem(flowerItem)
-
-        let walkItem = NSMenuItem(title: "一起散步", action: #selector(walkPets), keyEquivalent: "w")
-        walkItem.target = self
-        menu.addItem(walkItem)
-
-        let avatarItem = NSMenuItem(
-            title: "宠物形象",
-            action: #selector(togglePartnerAppearance),
-            keyEquivalent: "a"
+        let resetItem = NSMenuItem(
+            title: "重置位置",
+            action: #selector(resetPetPositions),
+            keyEquivalent: "r"
         )
-        avatarItem.target = self
-        menu.addItem(avatarItem)
-
-        let resetItem = NSMenuItem(title: "重置位置", action: #selector(resetDemo), keyEquivalent: "r")
         resetItem.target = self
         menu.addItem(resetItem)
         menu.addItem(.separator())
@@ -252,6 +262,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem = statusItem
     }
 
+    private func makePetOperationsItem(for petID: PetID) -> NSMenuItem {
+        let root = NSMenuItem(title: petOperationsTitle(for: petID), action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: root.title)
+        let actions: [(String, PetContextAction)] = if petID == .mine {
+            [
+                ("摸摸", .pet), ("投喂", .feed), ("陪玩", .play), ("散步", .walk),
+                ("休息", .rest), ("查看状态", .viewMemory), ("请求串门", .requestVisit),
+                ("重置位置", .resetPosition)
+            ]
+        } else {
+            [
+                ("摸摸", .pet), ("投喂", .feed), ("陪玩", .play), ("散步", .walk),
+                ("贴贴", .kiss), ("送花", .flower), ("托付文字信", .leaveLetter),
+                ("让它回家", .sendHome)
+            ]
+        }
+        for (title, action) in actions {
+            let item = NSMenuItem(
+                title: title,
+                action: #selector(performStatusPetAction(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.tag = action.rawValue
+            item.representedObject = petID.rawValue
+            submenu.addItem(item)
+        }
+        root.submenu = submenu
+        return root
+    }
+
+    private func petOperationsTitle(for petID: PetID) -> String {
+        if petID == .mine {
+            return "操作 \(currentProfile.petName)"
+        }
+        return "操作 \(selectedFriendProfile?.petName ?? runtimeIdentity.fallbackFriendPetName)"
+    }
+
+    private func refreshPetOperationsMenus() {
+        ownPetOperationsItem?.title = petOperationsTitle(for: .mine)
+        visitingPetOperationsItem?.title = petOperationsTitle(for: .partner)
+        ownPetOperationsItem?.isEnabled = world?.pets[.mine] != nil
+        visitingPetOperationsItem?.isEnabled = world?.pets[.partner] != nil
+    }
+
+    @objc
+    private func performStatusPetAction(_ sender: NSMenuItem) {
+        guard let action = PetContextAction(rawValue: sender.tag),
+              let rawPetID = sender.representedObject as? String,
+              let petID = PetID(rawValue: rawPetID) else { return }
+        handlePetContextAction(action, for: petID)
+    }
+
     private func setupSharedSpaceWindow() {
         sharedSpaceWindow = SharedSpaceWindowController(
             debugIdentityLabel: debugIdentityLabel,
@@ -259,54 +322,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 localPetName: runtimeIdentity.localPetName,
                 fallbackFriendPetName: runtimeIdentity.fallbackFriendPetName
             ),
-            onInteraction: { [weak self] action in
-                self?.demoSequence.stop()
-                switch action {
-                case .kiss:
-                    self?.world?.triggerKiss()
-                    self?.recordInteractionEvent(.kiss)
-                case .flower:
-                    self?.world?.triggerFlowerGift()
-                    self?.recordInteractionEvent(.flowerGift)
-                case .walk:
-                    self?.world?.walkAll()
-                    self?.recordInteractionEvent(.walk)
-                }
-            },
             onFriendAction: { [weak self] action in
                 self?.handleFriendDirectoryAction(action)
             },
-            onSendChatMessage: { [weak self] message in
-                guard let self else { return }
-                if let visit = self.activeIncomingVisit, visit.status == .active {
-                    self.sendVisitInteraction(.message, text: message, visitID: visit.id)
-                } else if let agentCoordinator = self.agentCoordinator {
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
-                        do {
-                            let joined: Bool
-                            if let friendshipID = sharedSpaceWindow?.model.selectedFriendshipID {
-                                joined = try await agentCoordinator
-                                    .sendOwnerMessageToActiveConversation(
-                                        message,
-                                        friendshipID: friendshipID
-                                    )
-                            } else {
-                                joined = false
-                            }
-                            if !joined {
-                                await agentCoordinator.observe(
-                                    AgentObservation(kind: .ownerMessage(text: message))
-                                )
-                            }
-                        } catch {
-                            sharedSpaceWindow?.model.visitErrorMessage =
-                                "消息没有送达，请稍后重试"
-                        }
-                    }
-                } else {
-                    self.submitOwnerObservation(.ownerMessage(text: message))
-                }
+            onProfileAction: { [weak self] action in
+                self?.handleProfileAction(action)
             },
             onOpenLetter: { [weak self] letterID in
                 self?.openLetter(letterID)
@@ -321,7 +341,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         )
+        sharedSpaceWindow?.model.currentProfile = currentProfile
+        sharedSpaceWindow?.model.localAccountID = currentProfile.accountID
+        if services.configuration.clientProfile != .standard {
+            sharedSpaceWindow?.model.ownPetCharacterID = runtimeDefaultCharacter
+        }
+        if services.configuration.backend.mode == .offline {
+            sharedSpaceWindow?.model.authenticationState = .offline
+            sharedSpaceWindow?.model.cloudSyncState = .localOnly
+        } else if services.configuration.clientProfile == .standard {
+            sharedSpaceWindow?.model.authenticationState = .signedOut
+            sharedSpaceWindow?.model.cloudSyncState = .localOnly
+        } else {
+            sharedSpaceWindow?.model.authenticationState = .signedIn
+            sharedSpaceWindow?.model.cloudSyncState = .connecting
+        }
         sharedSpaceWindow?.show()
+    }
+
+    private func setupVisitInvitationWindow() {
+        visitInvitationWindow = VisitInvitationWindowController { [weak self] invitation, response in
+            self?.respondToPendingVisit(invitationID: invitation.id, response: response)
+        }
     }
 
     @objc
@@ -330,42 +371,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handlePetContextAction(_ action: PetContextAction, for id: PetID) {
-        demoSequence.stop()
         switch action {
         case .pet:
-            break
-        case .speak:
-            guard let text = promptForText(
-                title: "说句话",
-                message: id == .partner
-                    ? "这句话会作为真人消息送给来访宠物。"
-                    : "告诉你的宠物，它会自己决定如何回应。",
-                placeholder: "想说什么？"
-            ) else { return }
-            if id == .partner, let visit = activeIncomingVisit, visit.status == .active {
-                sendVisitInteraction(.message, text: text, visitID: visit.id)
-            } else {
-                submitOwnerObservation(.ownerMessage(text: text))
-            }
+            performCareInteraction(.pet, for: id)
         case .feed:
-            if id == .partner, let visit = activeIncomingVisit, visit.status == .active {
-                sendVisitInteraction(.feed, visitID: visit.id)
-            } else {
-                submitOwnerObservation(.ownerInteraction(.feeding(foodName: nil)))
-            }
+            performCareInteraction(.feed, for: id)
         case .play:
-            if id == .partner, let visit = activeIncomingVisit, visit.status == .active {
-                sendVisitInteraction(.play, visitID: visit.id)
-            } else {
-                world?.walkAll()
-                submitOwnerObservation(.ownerInteraction(.play))
-            }
+            performCareInteraction(.play, for: id)
         case .requestVisit:
             guard id == .mine else { return }
             requestOwnPetVisit()
         case .viewMemory:
             guard id == .mine else { return }
-            showAgentMemories()
+            sharedSpaceWindow?.show()
+        case .rest:
+            guard id == .mine else { return }
+            performCareInteraction(.rest, for: id)
         case .leaveLetter:
             guard
                 id == .partner,
@@ -380,83 +401,318 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ) else { return }
             leaveLetter(body, on: visit.id)
         case .kiss:
-            world?.triggerKiss()
-            recordInteractionEvent(.kiss)
-        case .flower:
-            world?.triggerFlowerGift()
-            recordInteractionEvent(.flowerGift)
-        case .walk:
-            world?.walkAll()
-            recordInteractionEvent(.walk)
-        case .changeAppearance:
             guard id == .partner else { return }
-            world?.togglePartnerAppearance()
+            performCareInteraction(.cuddle, for: id)
+        case .flower:
+            guard id == .partner else { return }
+            performCareInteraction(.flower, for: id)
+        case .walk:
+            performCareInteraction(.walk, for: id)
         case .sendHome:
             guard id == .partner else { return }
-            if isSocialMVPConfigured {
-                guard activeIncomingVisit?.status == .active else {
-                    sharedSpaceWindow?.model.visitErrorMessage = "来访状态还未同步，请稍后再试"
-                    return
-                }
-                handleFriendDirectoryAction(.endVisit)
+            guard activeIncomingVisit?.status == .active else {
+                sharedSpaceWindow?.model.visitErrorMessage = "来访状态还未同步，请稍后再试"
                 return
             }
-            world?.setVisiblePet(nil, for: .partner)
-            sharedSpaceWindow?.model.visitState = .away
-            recordTimelineEvent(PersonalTimelineEvent(kind: .visitReturned))
+            handleFriendDirectoryAction(.endVisit)
         case .resetPosition:
-            world?.resetForDemo()
+            world?.resetPetPositions()
+        }
+    }
+
+    private func handlePetTouch(for id: PetID) {
+        performCareInteraction(.pet, for: id)
+    }
+
+    private func performCareInteraction(_ kind: PetCareInteractionKind, for id: PetID) {
+        guard id == .mine || activeIncomingVisit?.status == .active else {
+            sharedSpaceWindow?.model.visitErrorMessage = "这只 Mino 已经回家了"
+            return
+        }
+        if kind == .rest, id != .mine { return }
+
+        let occurredAt = Date()
+        let interactionID = UUID()
+        let relationship: PetInteractionActorRelationship = id == .mine ? .owner : .friend
+        let previous = recentCareInteractions[id]
+        let repeated = previous?.kind == kind && occurredAt.timeIntervalSince(previous?.at ?? .distantPast) < 30
+        let repeatCount = repeated ? (previous?.count ?? 0) + 1 : 0
+        recentCareInteractions[id] = (kind, occurredAt, repeatCount)
+
+        let source = careState(for: id, at: occurredAt)
+        let restOnCooldown = kind == .rest
+            && occurredAt.timeIntervalSince(recentRestAt[id] ?? .distantPast) < 3_600
+        let transition = PetCareRules.transition(
+            state: source,
+            kind: kind,
+            relationship: relationship,
+            repeatedWithinCooldown: repeated,
+            restOnCooldown: restOnCooldown,
+            at: occurredAt
+        )
+        if kind == .rest, transition.outcome == .applied {
+            recentRestAt[id] = occurredAt
+        }
+        careStates[id] = transition.state
+        if id == .mine {
+            sharedSpaceWindow?.model.ownPetCare = transition.state
+        }
+
+        let friendshipID = id == .partner ? activeIncomingVisit?.friendshipID : nil
+        let context = PetReactionContext(
+            interactionID: interactionID,
+            kind: kind,
+            relationship: relationship,
+            state: transition.state,
+            outcome: transition.outcome,
+            effect: transition.effect,
+            familiarityTier: friendshipID.flatMap { familiarities[$0]?.tier },
+            recentRepeatCount: repeatCount,
+            occurredAt: occurredAt
+        )
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let plan = await interactionResponseProvider.response(for: context)
+            applyReactionPlan(plan, to: id)
+        }
+
+        guard services.configuration.backend.mode == .remote,
+              let coordinator = socialVisitCoordinator else { return }
+        let targetPetID = id == .mine
+            ? currentProfile.petID
+            : (activeIncomingVisit?.visitorPetID ?? selectedFriendProfile?.petID)
+        guard let targetPetID else { return }
+        let visitID = id == .partner ? activeIncomingVisit?.id : nil
+        sharedSpaceWindow?.model.cloudSyncState = .pending
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let receipt = try await coordinator.interactWithPet(
+                    petID: targetPetID,
+                    kind: kind,
+                    visitID: visitID,
+                    occurredAt: occurredAt,
+                    idempotencyKey: interactionID
+                )
+                reconcileCareReceipt(receipt, petSlot: id)
+            } catch {
+                if shouldRetrySocialMutation(error) {
+                    // The persistent social outbox owns retryable delivery. The
+                    // immediate animation is never blocked or rolled back.
+                    sharedSpaceWindow?.model.cloudSyncState = .pending
+                    sharedSpaceWindow?.model.agentMessage = "互动已完成，稍后同步"
+                } else {
+                    // A definitive server rejection must not leave optimistic
+                    // care values pretending they were accepted.
+                    careStates[id] = source
+                    if id == .mine {
+                        sharedSpaceWindow?.model.ownPetCare = source
+                    }
+                    if sharedSpaceWindow?.model.cloudSyncState != .unavailable {
+                        sharedSpaceWindow?.model.cloudSyncState = .synced
+                    }
+                    sharedSpaceWindow?.model.agentMessage = "互动反馈已保留，这次状态没有保存"
+                }
+            }
+        }
+    }
+
+    private func careState(for id: PetID, at date: Date) -> PetCareState {
+        if let state = careStates[id] { return state.evaluated(at: date) }
+        guard id == .partner,
+              let summary = selectedFriendProfile?.publicCare else {
+            return PetCareState(evaluatedAt: date)
+        }
+        return PetCareState(
+            fullness: representativeValue(summary.fullness),
+            energy: representativeValue(summary.energy),
+            mood: representativeValue(summary.mood),
+            evaluatedAt: date
+        )
+    }
+
+    private func representativeValue(_ band: PetCareBand) -> Int {
+        switch band {
+        case .low: 24
+        case .steady: 54
+        case .high: 82
+        }
+    }
+
+    private func applyReactionPlan(_ plan: PetReactionPlan, to id: PetID) {
+        if plan.activity == .walking {
+            world?.walkAll()
+        } else {
+            world?.performLocalActivity(
+                id,
+                activity: plan.activity,
+                emotion: plan.emotion,
+                duration: plan.duration,
+                motionClip: plan.motionClip
+            )
+        }
+        switch plan.effect {
+        case .heart: world?.triggerKiss()
+        case .flower: world?.triggerFlowerGift()
+        case .none: break
+        }
+        petWindows[id]?.showSpeech(plan.speech, duration: plan.duration)
+        sharedSpaceWindow?.model.agentMessage = plan.speech
+    }
+
+    private func reconcileCareReceipt(_ receipt: PetInteractionReceipt, petSlot: PetID) {
+        if let careState = receipt.careState {
+            careStates[petSlot] = careState
+            if petSlot == .mine {
+                sharedSpaceWindow?.model.ownPetCare = careState
+            }
+        } else if petSlot == .partner {
+            careStates[.partner] = PetCareState(
+                fullness: representativeValue(receipt.publicCare.fullness),
+                energy: representativeValue(receipt.publicCare.energy),
+                mood: representativeValue(receipt.publicCare.mood),
+                evaluatedAt: receipt.occurredAt
+            )
+        }
+        if let familiarity = receipt.familiarity {
+            familiarities[familiarity.friendshipID] = familiarity
+        }
+        if sharedSpaceWindow?.model.cloudSyncState != .unavailable {
+            sharedSpaceWindow?.model.cloudSyncState = .synced
+        }
+        if let friendshipID = receipt.friendshipID {
+            updateFriendCare(
+                friendshipID: friendshipID,
+                publicCare: receipt.publicCare,
+                familiarity: receipt.familiarity
+            )
+        }
+    }
+
+    private func updateFriendCare(
+        friendshipID: FriendshipID,
+        publicCare: PublicPetCareSummary,
+        familiarity: PetFamiliarity?
+    ) {
+        guard let model = sharedSpaceWindow?.model else { return }
+        model.friends = model.friends.map { friend in
+            guard friend.friendshipID == friendshipID else { return friend }
+            return FriendProfile(
+                friendshipID: friend.friendshipID,
+                accountID: friend.accountID,
+                accountName: friend.accountName,
+                petID: friend.petID,
+                petName: friend.petName,
+                friendsSince: friend.friendsSince,
+                publicCare: publicCare,
+                familiarity: familiarity ?? friend.familiarity,
+                characterID: friend.characterID
+            )
         }
     }
 
     private func submitOwnerObservation(_ kind: AgentObservationKind) {
-        guard let agentCoordinator else {
-            sharedSpaceWindow?.model.agentMessage = "宠物的大脑还在连接中"
-            return
+        switch kind {
+        case .ownerMessage(let text):
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let route = await localInteractionRouter.routeOwnerMessage(text)
+                applyLocalInteractionRoute(route, to: .mine)
+                scheduleOwnerMessageFlush()
+            }
+
+        case .ownerInteraction(let stimulus):
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let route = await localInteractionRouter.routeOwnerInteraction(stimulus)
+                applyLocalInteractionRoute(route, to: .mine)
+            }
+
+        default:
+            submitAgentObservation(AgentObservation(kind: kind))
         }
-        Task { await agentCoordinator.observe(AgentObservation(kind: kind)) }
     }
 
-    private func sendVisitInteraction(
-        _ kind: VisitInteractionKind,
-        text: String? = nil,
-        visitID: PetVisitID
+    private func applyLocalInteractionRoute(
+        _ route: LocalInteractionRoute,
+        to petID: PetID
     ) {
-        guard let socialVisitCoordinator else { return }
-        world?.setWaitingForRemoteAgent(.partner, isWaiting: true)
-        sharedSpaceWindow?.model.agentMessage = "来访宠物在打盹，等自己的 Agent 回应"
-        Task { @MainActor [weak self] in
-            do {
-                _ = try await socialVisitCoordinator.interact(
-                    visitID: visitID,
-                    kind: kind,
-                    text: text
-                )
-                self?.sharedSpaceWindow?.model.agentMessage = switch kind {
-                case .feed: "投喂已经送到来访宠物那里"
-                case .play: "来访宠物开心地玩了起来"
-                case .message: "真人消息已经交给来访宠物"
+        if let immediateSpeech = route.immediateSpeech {
+            sharedSpaceWindow?.model.agentMessage = immediateSpeech
+        }
+        if let activity = route.activity {
+            world?.performLocalActivity(
+                petID,
+                activity: activity,
+                emotion: route.emotion
+            )
+        } else if let emotion = route.emotion {
+            world?.setPetEmotion(petID, emotion: emotion)
+        } else if route.startsWalk {
+            world?.walkAll()
+        }
+        if let observation = route.modelObservation {
+            submitAgentObservation(observation, reportUnavailable: false)
+        }
+    }
+
+    private func submitAgentObservation(
+        _ observation: AgentObservation,
+        reportUnavailable: Bool = true
+    ) {
+        guard isPrimaryAgentDevice, let agentCoordinator else {
+            if reportUnavailable {
+                sharedSpaceWindow?.model.agentMessage = "宠物的主 Agent 正在另一台设备上"
+            }
+            return
+        }
+        Task { await agentCoordinator.observe(observation) }
+    }
+
+    private func scheduleOwnerMessageFlush() {
+        ownerMessageDebounceTask?.cancel()
+        ownerMessageDebounceTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                guard let deadline = await localInteractionRouter.nextOwnerMessageDeadline() else {
+                    return
                 }
-            } catch {
-                self?.world?.setWaitingForRemoteAgent(.partner, isWaiting: false)
-                self?.sharedSpaceWindow?.model.visitErrorMessage = "互动没有送达，请稍后重试"
+                let delay = max(0, deadline.timeIntervalSince(Date()))
+                if delay > 0 {
+                    do {
+                        try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    } catch {
+                        return
+                    }
+                }
+                guard let observation = await localInteractionRouter
+                    .flushDebouncedOwnerMessageIfDue() else {
+                    continue
+                }
+                submitAgentObservation(observation)
+                return
             }
         }
     }
 
-    private func requestOwnPetVisit() {
+    private func requestOwnPetVisit(_ friendshipID: FriendshipID? = nil) {
+        if let friendshipID {
+            sharedSpaceWindow?.model.selectedFriendshipID = friendshipID
+        }
         guard
             let profile = developmentProfile,
             let friend = selectedFriendProfile,
             let socialVisitCoordinator,
             activeOutgoingVisit == nil,
-            activeIncomingVisit == nil
+            activeIncomingVisit == nil,
+            pendingVisits.isEmpty
         else {
             sharedSpaceWindow?.model.visitErrorMessage = "当前还不能发起新的串门"
             return
         }
         sharedSpaceWindow?.model.activeVisitFriendshipID = friend.friendshipID
         sharedSpaceWindow?.model.visitState = .sendingInvitation
+        sharedSpaceWindow?.model.cloudSyncState = .pending
         Task { @MainActor [weak self] in
             do {
                 let visit = try await socialVisitCoordinator.invite(
@@ -465,12 +721,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     hostAccountID: friend.accountID,
                     reason: "主人想让宠物过去串门"
                 )
-                self?.activeOutgoingVisit = visit
+                self?.pendingVisits[visit.id] = visit
+                self?.refreshVisitInvitationQueue()
                 self?.sharedSpaceWindow?.model.visitState = .invitationSent
+                if self?.sharedSpaceWindow?.model.cloudSyncState != .unavailable {
+                    self?.sharedSpaceWindow?.model.cloudSyncState = .synced
+                }
             } catch {
-                self?.sharedSpaceWindow?.model.visitState = .away
-                self?.sharedSpaceWindow?.model.activeVisitFriendshipID = nil
-                self?.sharedSpaceWindow?.model.visitErrorMessage = "串门请求没有送达"
+                if shouldRetrySocialMutation(error) {
+                    self?.sharedSpaceWindow?.model.visitState = .invitationSent
+                    self?.sharedSpaceWindow?.model.cloudSyncState = .pending
+                    self?.sharedSpaceWindow?.model.visitErrorMessage = "串门请求已排队，网络恢复后自动送达"
+                } else {
+                    self?.sharedSpaceWindow?.model.visitState = .away
+                    self?.sharedSpaceWindow?.model.activeVisitFriendshipID = nil
+                    self?.sharedSpaceWindow?.model.visitErrorMessage = "这次串门请求无法发送"
+                }
             }
         }
     }
@@ -485,6 +751,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 self?.pendingLetterDraft = nil
                 self?.sharedSpaceWindow?.model.agentMessage = "信已经封好，会随宠物回家"
+                self?.world?.performLocalActivity(
+                    .partner,
+                    activity: .offeringGift,
+                    emotion: .grateful,
+                    duration: 1.4,
+                    motionClip: .letterGive
+                )
             } catch {
                 self?.pendingLetterDraft = body
                 self?.sharedSpaceWindow?.model.visitErrorMessage = "信暂时保留在输入框，请稍后重试"
@@ -496,18 +769,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                guard let friendshipID = sharedSpaceWindow?.model.timelineEvents.first(where: {
+                guard sharedSpaceWindow?.model.timelineEvents.contains(where: {
                     $0.letterID == letterID
-                })?.friendshipID else {
+                }) == true else {
                     throw BackendClientError.invalidRequest
                 }
-                let letter = try await services.backend.fetchLetter(
-                    friendshipID: friendshipID,
-                    letterID
-                )
+                let letter = try await services.backend.fetchLetter(letterID)
                 let alert = NSAlert()
                 alert.messageText = "宠物带回来的信"
-                alert.informativeText = letter.body
+                alert.informativeText = letter.body ?? "信件正文暂不可用"
                 alert.addButton(withTitle: "收好")
                 alert.runModal()
             } catch {
@@ -567,34 +837,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc
-    private func playDemo() {
-        guard let world else { return }
-        hostVisitingFriendPetIfNeeded(in: world)
-        demoSequence.play(in: world)
-    }
-
-    @objc
     private func togglePartnerVisit() {
-        if isSocialMVPConfigured {
-            if activeIncomingVisit?.status == .active || activeOutgoingVisit?.status == .active {
-                requestRemoteVisitReturn()
-            } else if activeIncomingVisit != nil || activeOutgoingVisit != nil {
-                sharedSpaceWindow?.model.agentMessage = "串门提议正在等待宠物作决定"
-            } else {
-                requestOwnPetVisit()
-            }
-            return
-        }
-        guard let world else { return }
-        demoSequence.stop()
-        if world.pets[.partner] == nil {
-            hostVisitingFriendPetIfNeeded(in: world)
-            sharedSpaceWindow?.model.visitState = .visiting
-            recordTimelineEvent(PersonalTimelineEvent(kind: .visitArrived))
+        guard isSocialMVPConfigured else { return }
+        if activeIncomingVisit?.status == .active || activeOutgoingVisit?.status == .active {
+            requestRemoteVisitReturn()
+        } else if !pendingVisits.isEmpty {
+            sharedSpaceWindow?.model.agentMessage = "串门邀请正在等待好友回应"
         } else {
-            world.setVisiblePet(nil, for: .partner)
-            sharedSpaceWindow?.model.visitState = .away
-            recordTimelineEvent(PersonalTimelineEvent(kind: .visitReturned))
+            requestOwnPetVisit()
         }
     }
 
@@ -602,7 +852,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch action {
         case .refresh:
             guard services.configuration.backend.mode == .remote else {
-                sharedSpaceWindow?.model.friendErrorMessage = "离线模式不能刷新好友列表"
+                sharedSpaceWindow?.model.friendErrorMessage = "好友服务当前不可用，请稍后重试"
                 return
             }
             sharedSpaceWindow?.model.friendOperationInProgress = true
@@ -625,8 +875,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         case .selectFriend(let friendshipID):
             sharedSpaceWindow?.model.selectedFriendshipID = friendshipID
+            loadFriendTimeline(friendshipID)
 
-        case .inviteFriend(let friendshipID):
+        case .inviteFriendPet(let friendshipID):
             guard sharedSpaceWindow?.model.visitState == .away else { return }
             guard let friend = friendProfile(id: friendshipID) else {
                 sharedSpaceWindow?.model.friendErrorMessage = "这位好友已不在列表中，请刷新后重试"
@@ -641,6 +892,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 simulatePartnerVisitInvitation()
             }
 
+        case .sendOwnPet(let friendshipID):
+            guard sharedSpaceWindow?.model.visitState == .away else { return }
+            guard friendProfile(id: friendshipID) != nil else {
+                sharedSpaceWindow?.model.friendErrorMessage = "这位好友已不在列表中，请刷新后重试"
+                return
+            }
+            sharedSpaceWindow?.model.visitErrorMessage = nil
+            sharedSpaceWindow?.model.activeVisitFriendshipID = friendshipID
+            requestOwnPetVisit(friendshipID)
+
+        case .respondToVisit(let response):
+            respondToPendingVisit(response)
+
         case .endVisit:
             guard let visitState = sharedSpaceWindow?.model.visitState,
                   visitState == .visiting || visitState == .ownPetVisiting else { return }
@@ -650,6 +914,431 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 finishSimulatedPartnerVisit()
             }
+        }
+    }
+
+    private func respondToPendingVisit(_ response: VisitResponse) {
+        guard let visitID = visitInvitationWindow?.currentInvitation?.id
+            ?? pendingVisits.values
+                .filter({ $0.responderAccountID == developmentProfile?.accountID })
+                .sorted(by: { $0.createdAt < $1.createdAt })
+                .first?.id
+        else {
+            sharedSpaceWindow?.model.visitErrorMessage = "这次串门请求已经处理，请刷新后查看"
+            accountEventSyncCoordinator?.requestCatchUp()
+            return
+        }
+        respondToPendingVisit(invitationID: visitID, response: response)
+    }
+
+    private func respondToPendingVisit(
+        invitationID: PetVisitID,
+        response: VisitResponse
+    ) {
+        guard services.configuration.backend.mode == .remote,
+              let profile = developmentProfile,
+              let visits = socialVisitCoordinator,
+              let pending = pendingVisits[invitationID],
+              pending.status == .pending,
+              pending.responderAccountID == profile.accountID else {
+            visitInvitationWindow?.resolve(invitationID)
+            sharedSpaceWindow?.model.visitErrorMessage = "这次串门请求已经处理，请刷新后查看"
+            accountEventSyncCoordinator?.requestCatchUp()
+            return
+        }
+
+        sharedSpaceWindow?.model.friendOperationInProgress = true
+        sharedSpaceWindow?.model.visitErrorMessage = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { sharedSpaceWindow?.model.friendOperationInProgress = false }
+            do {
+                let updated = try await visits.respond(
+                    visitID: pending.id,
+                    response: response,
+                    actorType: .human
+                )
+                await visits.apply(updated)
+                pendingVisits[updated.id] = nil
+                visitInvitationWindow?.resolve(updated.id)
+
+                if response == .decline {
+                    sharedSpaceWindow?.model.activeVisitFriendshipID = nil
+                    sharedSpaceWindow?.model.visitState = .away
+                } else if updated.visitorPetID == profile.petID {
+                    activeOutgoingVisit = updated
+                    activeIncomingVisit = nil
+                    animateOwnPetLeavingForVisit()
+                    sharedSpaceWindow?.model.visitState = .ownPetVisiting
+                } else {
+                    activeIncomingVisit = updated
+                    activeOutgoingVisit = nil
+                    announceVisitArrival()
+                    sharedSpaceWindow?.model.visitState = .visiting
+                }
+                if sharedSpaceWindow?.model.cloudSyncState != .unavailable {
+                    sharedSpaceWindow?.model.cloudSyncState = .synced
+                }
+                accountEventSyncCoordinator?.requestCatchUp()
+            } catch {
+                if shouldRetrySocialMutation(error) {
+                    sharedSpaceWindow?.model.cloudSyncState = .pending
+                    visitInvitationWindow?.failResponse(
+                        for: invitationID,
+                        message: "网络暂时没有送达，请重试"
+                    )
+                } else {
+                    pendingVisits[invitationID] = nil
+                    visitInvitationWindow?.resolve(invitationID)
+                    sharedSpaceWindow?.model.visitErrorMessage = "这次邀请已经失效"
+                }
+                accountEventSyncCoordinator?.requestCatchUp()
+            }
+        }
+    }
+
+    private func loadFriendTimeline(_ friendshipID: FriendshipID) {
+        guard let model = sharedSpaceWindow?.model else { return }
+        let localEvents = model.timelineEvents.filter {
+            $0.friendshipID == friendshipID
+        }
+        model.friendTimelineEvents[friendshipID] = deduplicatedTimeline(localEvents)
+        model.friendTimelineError[friendshipID] = nil
+
+        guard services.configuration.backend.mode == .remote else { return }
+        model.friendTimelineLoading.insert(friendshipID)
+        Task { @MainActor [weak self] in
+            guard let self, let model = sharedSpaceWindow?.model else { return }
+            defer { model.friendTimelineLoading.remove(friendshipID) }
+            do {
+                var cursor: Int64 = 0
+                var fetched: [PersonalTimelineEvent] = []
+                while true {
+                    let page = try await services.backend.fetchAccountEvents(
+                        after: cursor,
+                        limit: 100,
+                        timelineVisible: true
+                    )
+                    let converted = page.events
+                        .filter { $0.friendshipID == friendshipID }
+                        .compactMap { $0.timelineEvent() }
+                    fetched.append(contentsOf: converted)
+                    guard page.events.count == 100, page.nextCursor > cursor else { break }
+                    cursor = page.nextCursor
+                }
+                let latestLocalEvents = model.timelineEvents.filter {
+                    $0.friendshipID == friendshipID
+                }
+                model.friendTimelineEvents[friendshipID] = deduplicatedTimeline(
+                    latestLocalEvents + fetched
+                )
+                model.friendTimelineError[friendshipID] = nil
+            } catch {
+                model.friendTimelineError[friendshipID] = localEvents.isEmpty
+                    ? "暂时无法加载这位好友的事件，请稍后重试"
+                    : "远端事件暂时未同步，当前显示本地记录"
+            }
+        }
+    }
+
+    private func deduplicatedTimeline(
+        _ events: [PersonalTimelineEvent]
+    ) -> [PersonalTimelineEvent] {
+        var seen = Set<String>()
+        return events
+            .sorted { $0.occurredAt > $1.occurredAt }
+            .filter { seen.insert($0.id).inserted }
+    }
+
+    private func handleProfileAction(_ action: ProfileAction) {
+        switch action {
+        case .signInWithGitHub:
+            startGitHubSignIn()
+        case .cancelSignIn:
+            cancelGitHubSignIn()
+        case .signOut:
+            signOut()
+        case .saveProfile(let accountName, let petName):
+            saveCurrentProfile(accountName: accountName, petName: petName)
+        case .selectPetCharacter(let characterID):
+            selectPetCharacter(characterID)
+        case .acknowledgePetCharacterSelection:
+            sharedSpaceWindow?.model.petCharacterSelectionState = .hidden
+        }
+    }
+
+    private func selectPetCharacter(_ characterID: PetCharacterID) {
+        guard let model = sharedSpaceWindow?.model else { return }
+        switch model.petCharacterSelectionState {
+        case .required, .failed:
+            break
+        case .hidden, .saving, .pendingSync, .confirmed, .conflict:
+            return
+        }
+
+        let idempotencyKey = UUID()
+        applyOwnPetCharacter(characterID)
+        model.petCharacterSelectionState = .saving(characterID)
+        model.cloudSyncState = .pending
+
+        guard let coordinator = socialVisitCoordinator else {
+            model.petCharacterSelectionState = .pendingSync(characterID)
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self, let model = self.sharedSpaceWindow?.model else { return }
+            do {
+                let snapshot = try await coordinator.updateOwnPetAppearance(
+                    characterID: characterID,
+                    idempotencyKey: idempotencyKey
+                )
+                guard let authoritative = PetCharacterID(appearance: snapshot.appearance) else {
+                    throw BackendClientError.invalidResponse
+                }
+                applyOwnPetCharacter(authoritative)
+                model.petCharacterSelectionState = authoritative == characterID
+                    ? .confirmed(authoritative)
+                    : .conflict(authoritative: authoritative)
+                model.cloudSyncState = .synced
+            } catch BackendClientError.httpStatus(let statusCode, let code)
+                where statusCode == 409 && code == "appearance_locked" {
+                do {
+                    let bootstrap = try await services.backend.fetchSyncBootstrap()
+                    guard let authoritative = PetCharacterID(
+                        appearance: bootstrap.pet.appearance
+                    ) else { throw BackendClientError.invalidResponse }
+                    applyOwnPetCharacter(authoritative)
+                    model.petCharacterSelectionState = .conflict(
+                        authoritative: authoritative
+                    )
+                    model.cloudSyncState = .synced
+                } catch {
+                    model.petCharacterSelectionState = .failed(
+                        preselected: characterID,
+                        message: "账号已有角色，但暂时无法取回。请重新连接后再试。"
+                    )
+                }
+            } catch {
+                if shouldRetrySocialMutation(error) {
+                    model.petCharacterSelectionState = .pendingSync(characterID)
+                    model.cloudSyncState = .pending
+                } else {
+                    model.petCharacterSelectionState = .failed(
+                        preselected: characterID,
+                        message: "角色没有确认成功，请检查账号状态后重试。"
+                    )
+                    if model.cloudSyncState != .unavailable {
+                        model.cloudSyncState = .synced
+                    }
+                }
+            }
+        }
+    }
+
+    private func startGitHubSignIn() {
+        guard services.configuration.backend.mode == .remote,
+              services.configuration.clientProfile == .standard else {
+            sharedSpaceWindow?.model.authenticationErrorMessage = "账号服务当前不可用，请稍后重试"
+            return
+        }
+        githubSignInTask?.cancel()
+        sharedSpaceWindow?.model.authenticationOperationInProgress = true
+        sharedSpaceWindow?.model.authenticationErrorMessage = nil
+        sharedSpaceWindow?.model.githubDeviceCodeWasAutoCopied = false
+        sharedSpaceWindow?.model.cloudSyncState = .connecting
+        githubSignInTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let authorization = try await services.backend.startGitHubDeviceAuthorization()
+                sharedSpaceWindow?.model.beginGitHubAuthorization(
+                    userCode: authorization.userCode,
+                    verificationURL: authorization.verificationURI
+                )
+                NSWorkspace.shared.open(authorization.verificationURI)
+                let deviceID = DeviceID(rawValue: UUID().uuidString)
+                let device = DeviceMetadata(
+                    id: deviceID,
+                    displayName: Host.current().localizedName ?? "Mino Mac",
+                    appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+                )
+                let expiresAt = Date().addingTimeInterval(TimeInterval(authorization.expiresIn))
+                var retryAfter = max(1, authorization.interval)
+                while Date() < expiresAt {
+                    try await Task.sleep(for: .seconds(retryAfter))
+                    let completion: GitHubDeviceCompletion
+                    do {
+                        completion = try await services.backend.completeGitHubDeviceAuthorization(
+                            deviceCode: authorization.deviceCode,
+                            device: device
+                        )
+                    } catch {
+                        switch githubDevicePollingDecision(
+                            for: error,
+                            currentInterval: retryAfter,
+                            expiresAt: expiresAt
+                        ) {
+                        case .retry(let afterSeconds):
+                            retryAfter = afterSeconds
+                            continue
+                        case .stop(let failure):
+                            throw failure
+                        }
+                    }
+                    if completion.status == .pending {
+                        retryAfter = max(1, completion.retryAfterSeconds ?? retryAfter)
+                        continue
+                    }
+                    guard let session = completion.session else {
+                        throw GitHubDevicePollingFailure.failed
+                    }
+                    do {
+                        try await services.sessionStore.save(sessionCredential(from: session))
+                    } catch {
+                        sharedSpaceWindow?.model.authenticationState = .signedOut
+                        sharedSpaceWindow?.model.githubDeviceCodeWasAutoCopied = false
+                        sharedSpaceWindow?.model.cloudSyncState = .localOnly
+                        sharedSpaceWindow?.model.authenticationOperationInProgress = false
+                        sharedSpaceWindow?.model.authenticationErrorMessage =
+                            "GitHub 授权已完成，但 Mino 无法写入本地安全存储。请检查磁盘权限后重试"
+                        MinoLog.lifecycle.error(
+                            "GitHub session persistence failed: \(String(describing: error), privacy: .public)"
+                        )
+                        return
+                    }
+                    sharedSpaceWindow?.model.authenticationState = .signedIn
+                    sharedSpaceWindow?.model.githubDeviceCodeWasAutoCopied = false
+                    sharedSpaceWindow?.model.cloudSyncState = .connecting
+                    sharedSpaceWindow?.model.authenticationOperationInProgress = false
+                    startSocialMVPIfConfigured()
+                    return
+                }
+                throw GitHubDevicePollingFailure.expired
+            } catch is CancellationError {
+                return
+            } catch let failure as GitHubDevicePollingFailure {
+                sharedSpaceWindow?.model.authenticationState = .signedOut
+                sharedSpaceWindow?.model.githubDeviceCodeWasAutoCopied = false
+                sharedSpaceWindow?.model.cloudSyncState = .localOnly
+                sharedSpaceWindow?.model.authenticationOperationInProgress = false
+                sharedSpaceWindow?.model.authenticationErrorMessage = failure.userMessage
+            } catch {
+                sharedSpaceWindow?.model.authenticationState = .signedOut
+                sharedSpaceWindow?.model.githubDeviceCodeWasAutoCopied = false
+                sharedSpaceWindow?.model.cloudSyncState = .localOnly
+                sharedSpaceWindow?.model.authenticationOperationInProgress = false
+                sharedSpaceWindow?.model.authenticationErrorMessage =
+                    "暂时无法连接 GitHub，请检查网络后重试"
+            }
+        }
+    }
+
+    private func cancelGitHubSignIn() {
+        githubSignInTask?.cancel()
+        githubSignInTask = nil
+        sharedSpaceWindow?.model.authenticationState = .signedOut
+        sharedSpaceWindow?.model.githubDeviceCodeWasAutoCopied = false
+        sharedSpaceWindow?.model.cloudSyncState = .localOnly
+        sharedSpaceWindow?.model.authenticationOperationInProgress = false
+        sharedSpaceWindow?.model.authenticationErrorMessage = nil
+    }
+
+    private func signOut() {
+        githubSignInTask?.cancel()
+        sharedSpaceWindow?.model.authenticationOperationInProgress = true
+        sharedSpaceWindow?.model.githubDeviceCodeWasAutoCopied = false
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let oldCredential = try? await services.sessionStore.load()
+            try? await services.backend.logout()
+            try? await services.sessionStore.clear()
+            if let accountID = oldCredential?.accountID {
+                try? await services.accountEventCursorStore.clear(for: accountID)
+            }
+            try? await services.personalTimelineStore.clear()
+            try? await services.socialMutationOutbox.clear()
+            if let petID = developmentProfile?.petID {
+                try? await agentMemoryStore?.removeAll(for: petID)
+            }
+            stopSocialRuntime()
+            applyCurrentProfile(Self.defaultProfile(for: .standard))
+            sharedSpaceWindow?.model.authenticationState = .signedOut
+            sharedSpaceWindow?.model.cloudSyncState = .localOnly
+            sharedSpaceWindow?.model.authenticationOperationInProgress = false
+            sharedSpaceWindow?.model.authenticationErrorMessage = nil
+        }
+    }
+
+    private func sessionCredential(from session: AccountSession) -> SessionCredential {
+        SessionCredential(
+            accountID: session.accountID,
+            deviceID: session.device.id,
+            accessToken: session.accessToken,
+            refreshToken: session.refreshToken,
+            accessTokenExpiresAt: session.accessExpiresAt,
+            issuedAt: Date()
+        )
+    }
+
+    private func saveCurrentProfile(accountName: String, petName: String) {
+        let normalizedAccountName = accountName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPetName = petName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedAccountName.isEmpty, normalizedAccountName.count <= 40 else {
+            sharedSpaceWindow?.model.profileErrorMessage = "账号昵称需要填写，且不能超过 40 个字符"
+            return
+        }
+        guard !normalizedPetName.isEmpty, normalizedPetName.count <= 24 else {
+            sharedSpaceWindow?.model.profileErrorMessage = "宠物名字需要填写，且不能超过 24 个字符"
+            return
+        }
+
+        sharedSpaceWindow?.model.profileOperationInProgress = true
+        sharedSpaceWindow?.model.profileErrorMessage = nil
+        sharedSpaceWindow?.model.profileSuccessMessage = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { sharedSpaceWindow?.model.profileOperationInProgress = false }
+            do {
+                let profile: CurrentProfile
+                if services.configuration.backend.mode == .remote {
+                    profile = try await services.backend.updateCurrentProfile(
+                        accountName: normalizedAccountName,
+                        petName: normalizedPetName
+                    )
+                } else {
+                    profile = CurrentProfile(
+                        accountID: currentProfile.accountID,
+                        petID: currentProfile.petID,
+                        accountName: normalizedAccountName,
+                        petName: normalizedPetName,
+                        createdAt: currentProfile.createdAt
+                    )
+                }
+                applyCurrentProfile(profile)
+                if services.configuration.backend.mode == .remote {
+                    try? await refreshFriendDirectory()
+                }
+                sharedSpaceWindow?.model.profileSuccessMessage = "个人资料已保存"
+            } catch {
+                sharedSpaceWindow?.model.profileErrorMessage = "资料没有保存成功，请检查连接后重试"
+            }
+        }
+    }
+
+    private func applyCurrentProfile(_ profile: CurrentProfile) {
+        currentProfile = profile
+        identityMenuItem?.title = "我的宠物 · \(profile.petName)"
+        sharedSpaceWindow?.model.currentProfile = profile
+        sharedSpaceWindow?.model.localAccountID = profile.accountID
+        world?.setDisplayName(profile.petName, for: .mine)
+        petWindows[.mine]?.updateDisplayName(profile.petName)
+        refreshPetOperationsMenus()
+        refreshVisitInvitationQueue()
+        try? LocalProfilePreferences.save(
+            profile,
+            for: services.configuration.clientProfile
+        )
+        if let agentCoordinator {
+            Task { await agentCoordinator.updateDisplayName(profile.petName) }
         }
     }
 
@@ -664,7 +1353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return friendProfile(id: id)
     }
 
-    private func friendProfile(for visit: MVPVisit) -> FriendProfile? {
+    private func friendProfile(for visit: Visit) -> FriendProfile? {
         if visit.visitorOwnerAccountID == developmentProfile?.accountID {
             return sharedSpaceWindow?.model.friends.first {
                 $0.accountID == visit.hostAccountID
@@ -675,8 +1364,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func refreshVisitInvitationQueue() {
+        guard let accountID = developmentProfile?.accountID else {
+            visitInvitationWindow?.dismissAll()
+            return
+        }
+        let presentations = pendingVisits.values
+            .filter { $0.status == .pending && $0.responderAccountID == accountID }
+            .sorted {
+                $0.createdAt == $1.createdAt
+                    ? $0.id.rawValue < $1.id.rawValue
+                    : $0.createdAt < $1.createdAt
+            }
+            .map { visit in
+                let friend = friendProfile(for: visit)
+                let direction: VisitPresentationDirection =
+                    visit.visitorOwnerAccountID == accountID
+                    ? .myPetToFriendDesktop
+                    : .friendPetToMyDesktop
+                return VisitInvitationPresentation(
+                    id: visit.id,
+                    friendName: friend?.accountName ?? "好友",
+                    petName: direction == .myPetToFriendDesktop
+                        ? currentProfile.petName
+                        : (friend?.petName ?? "好友的 Mino"),
+                    direction: direction,
+                    characterID: direction == .myPetToFriendDesktop
+                        ? ownPetCharacterID
+                        : (friend?.characterID ?? fallbackFriendCharacter)
+                )
+            }
+        visitInvitationWindow?.replaceQueue(presentations)
+    }
+
     private func friendPetID(
-        for visit: MVPVisit,
+        for visit: Visit,
         localPetID: PetProfileID
     ) -> PetProfileID? {
         if visit.visitorPetID != localPetID {
@@ -687,7 +1409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func submitFriendRequest(to accountID: AccountID) {
         guard services.configuration.backend.mode == .remote else {
-            sharedSpaceWindow?.model.friendErrorMessage = "离线模式不能发送好友申请"
+            sharedSpaceWindow?.model.friendErrorMessage = "账号服务当前不可用，暂时无法发送好友申请"
             return
         }
         sharedSpaceWindow?.model.friendOperationInProgress = true
@@ -718,7 +1440,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer { sharedSpaceWindow?.model.friendOperationInProgress = false }
             do {
                 _ = try await services.backend.respondToFriendRequest(
-                    requestID: requestID,
+                    friendshipID: FriendshipID(rawValue: requestID.rawValue),
                     command: RespondFriendRequestCommand(response: decision)
                 )
                 try await refreshFriendDirectory()
@@ -739,6 +1461,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return $0.accountName < $1.accountName
         }
         sharedSpaceWindow?.model.friends = sortedFriends
+        for friend in sortedFriends {
+            if let familiarity = friend.familiarity {
+                familiarities[friend.friendshipID] = familiarity
+            }
+            if let characterID = friend.characterID {
+                sharedSpaceWindow?.model.friendCharacterIDs[friend.petID] = characterID
+            }
+        }
+        if let visitorPetID = activeIncomingVisit?.visitorPetID,
+           let characterID = sharedSpaceWindow?.model.friendCharacterIDs[visitorPetID] {
+            world?.setCharacter(characterID, for: .partner)
+        }
+        if let activeFriend = sortedFriends.first(where: {
+            $0.friendshipID == activeIncomingVisit?.friendshipID
+        }), let publicCare = activeFriend.publicCare {
+            careStates[.partner] = PetCareState(
+                fullness: representativeValue(publicCare.fullness),
+                energy: representativeValue(publicCare.energy),
+                mood: representativeValue(publicCare.mood)
+            )
+        }
         sharedSpaceWindow?.model.friendRequests = requests.sorted {
             $0.createdAt > $1.createdAt
         }
@@ -751,8 +1494,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let agentCoordinator {
             await agentCoordinator.updateFriends(agentFriends)
-            reconcileEventSyncCoordinators()
         }
+        refreshVisitInvitationQueue()
         if let selected = sharedSpaceWindow?.model.selectedFriendshipID,
            friends.contains(where: { $0.friendshipID == selected }) {
             return
@@ -775,8 +1518,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sharedSpaceWindow?.model.visitState = .invitationSent
             guard await pauseVisitTask(for: .milliseconds(1_100)) else { return }
             guard let world else { return }
-            hostVisitingFriendPetIfNeeded(in: world)
             sharedSpaceWindow?.model.visitState = .visiting
+            world.animatePetEntering(
+                visitingFriendPetState(for: nil, in: world),
+                beside: .mine,
+                from: .nearest,
+                reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            ) { [weak self] in
+                self?.petWindows[.partner]?.showSpeech("我来串门啦，一起玩吧。", duration: 2.4)
+                self?.world?.performLocalActivity(
+                    .partner,
+                    activity: .celebrating,
+                    emotion: .excited,
+                    duration: 1.15,
+                    motionClip: .welcome
+                )
+            }
             await persistTimelineEvent(
                 PersonalTimelineEvent(
                     kind: .visitArrived,
@@ -789,10 +1546,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func finishSimulatedPartnerVisit() {
         visitTransitionTask?.cancel()
         sharedSpaceWindow?.model.visitState = .returning
-        world?.setVisiblePet(nil, for: .partner)
         visitTransitionTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            guard await pauseVisitTask(for: .milliseconds(650)) else { return }
+            await animateVisitDeparture(for: .partner)
+            world?.setVisiblePet(nil, for: .partner)
             await persistTimelineEvent(PersonalTimelineEvent(kind: .visitReturned))
             sharedSpaceWindow?.model.visitState = .away
         }
@@ -801,6 +1558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func sendRemoteVisitInvitation(to friend: FriendProfile) {
         visitTransitionTask?.cancel()
         sharedSpaceWindow?.model.visitState = .sendingInvitation
+        sharedSpaceWindow?.model.cloudSyncState = .pending
         guard let profile = developmentProfile,
               let visits = socialVisitCoordinator else {
             sharedSpaceWindow?.model.visitState = .away
@@ -810,17 +1568,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         visitTransitionTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                _ = try await visits.invite(
+                let visit = try await visits.invite(
                     friendshipID: friend.friendshipID,
                     visitorPetID: friend.petID,
                     hostAccountID: profile.accountID,
                     reason: "好友邀请宠物过来玩"
                 )
+                pendingVisits[visit.id] = visit
+                refreshVisitInvitationQueue()
                 sharedSpaceWindow?.model.visitState = .invitationSent
+                if sharedSpaceWindow?.model.cloudSyncState != .unavailable {
+                    sharedSpaceWindow?.model.cloudSyncState = .synced
+                }
             } catch {
-                sharedSpaceWindow?.model.visitState = .away
-                sharedSpaceWindow?.model.activeVisitFriendshipID = nil
-                sharedSpaceWindow?.model.visitErrorMessage = visitErrorMessage(for: error)
+                if shouldRetrySocialMutation(error) {
+                    sharedSpaceWindow?.model.visitState = .invitationSent
+                    sharedSpaceWindow?.model.cloudSyncState = .pending
+                    sharedSpaceWindow?.model.visitErrorMessage =
+                        "串门请求已排队，网络恢复后自动送达"
+                } else {
+                    sharedSpaceWindow?.model.visitState = .away
+                    sharedSpaceWindow?.model.activeVisitFriendshipID = nil
+                    sharedSpaceWindow?.model.visitErrorMessage = "这次串门请求无法发送"
+                }
             }
         }
     }
@@ -831,24 +1601,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            let activeVisit = activeIncomingVisit ?? activeOutgoingVisit {
             let wasIncoming = activeIncomingVisit?.id == activeVisit.id
             sharedSpaceWindow?.model.visitState = .returning
-            if wasIncoming {
-                world?.setVisiblePet(nil, for: .partner)
-            } else {
-                world?.setVisiblePet(nil, for: .mine)
-            }
+            sharedSpaceWindow?.model.cloudSyncState = .pending
+            optimisticallyReturningVisitIDs.insert(activeVisit.id)
             visitTransitionTask = Task { @MainActor [weak self] in
                 guard let self else { return }
+                async let endRequest = visits.end(visitID: activeVisit.id)
+                if wasIncoming {
+                    await animateVisitDeparture(for: .partner)
+                    world?.setVisiblePet(nil, for: .partner)
+                } else {
+                    animateOwnPetReturningHome()
+                }
                 do {
-                    _ = try await visits.end(visitID: activeVisit.id)
-                } catch {
-                    if wasIncoming, let world {
-                        hostVisitingFriendPetIfNeeded(in: world)
-                        sharedSpaceWindow?.model.visitState = .visiting
+                    let ended = try await endRequest
+                    await visits.apply(ended)
+                    if wasIncoming {
+                        activeIncomingVisit = nil
+                        announcedIncomingVisitID = nil
                     } else {
-                        ensureLocalPetVisible()
-                        sharedSpaceWindow?.model.visitState = .ownPetVisiting
+                        activeOutgoingVisit = nil
                     }
-                    sharedSpaceWindow?.model.visitErrorMessage = visitErrorMessage(for: error)
+                    sharedSpaceWindow?.model.visitState = .away
+                    if sharedSpaceWindow?.model.cloudSyncState != .unavailable {
+                        sharedSpaceWindow?.model.cloudSyncState = .synced
+                    }
+                    accountEventSyncCoordinator?.requestCatchUp()
+                } catch {
+                    if shouldRetrySocialMutation(error) {
+                        sharedSpaceWindow?.model.cloudSyncState = .pending
+                        sharedSpaceWindow?.model.visitErrorMessage =
+                            "回家请求已排队，网络恢复后自动完成"
+                    } else {
+                        optimisticallyReturningVisitIDs.remove(activeVisit.id)
+                        if wasIncoming, let world {
+                            world.setVisiblePet(
+                                visitingFriendPetState(for: activeVisit, in: world),
+                                for: .partner
+                            )
+                            sharedSpaceWindow?.model.visitState = .visiting
+                        } else {
+                            world?.setVisiblePet(nil, for: .mine)
+                            sharedSpaceWindow?.model.visitState = .ownPetVisiting
+                        }
+                        if sharedSpaceWindow?.model.cloudSyncState != .unavailable {
+                            sharedSpaceWindow?.model.cloudSyncState = .synced
+                        }
+                        sharedSpaceWindow?.model.visitErrorMessage = "这次回家请求无法完成"
+                    }
                 }
             }
             return
@@ -862,51 +1661,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func recordInteractionEvent(_ kind: PetInteractionKind) {
-        guard world?.pets[.partner] != nil else { return }
-        if let visit = activeIncomingVisit, visit.status == .active {
-            let description = switch kind {
-            case .kiss: "两只宠物亲亲了一下"
-            case .flowerGift: "主人和宠物送给来访宠物一朵花"
-            case .walk: "两只宠物一起散步"
-            }
-            sendVisitInteraction(.play, text: description, visitID: visit.id)
-            return
-        }
-        if isSocialMVPConfigured {
-            guard let profile = developmentProfile,
-                  let friend = selectedFriendProfile else {
-                sharedSpaceWindow?.model.visitErrorMessage = "请先在好友页选择一位好友"
-                return
-            }
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                do {
-                    _ = try await services.backend.sendInteraction(
-                        InteractionCommand(
-                            kind: kind,
-                            senderPetID: profile.petID,
-                            recipientPetID: friend.petID
-                        )
-                    )
-                } catch {
-                    sharedSpaceWindow?.model.visitErrorMessage = "互动没有送达，请稍后重试"
-                }
-            }
-            return
-        }
-        recordTimelineEvent(
-            PersonalTimelineEvent(
-                kind: .interaction,
-                interactionKind: kind
-            )
-        )
-    }
-
     private func persistTimelineEvent(_ event: PersonalTimelineEvent) async {
         do {
             try await services.personalTimelineStore.append(event)
-            sharedSpaceWindow?.model.timelineEvents = try await services.personalTimelineStore.load()
+            let timeline = try await services.personalTimelineStore.load()
+            sharedSpaceWindow?.model.timelineEvents = timeline
+            if let friendshipID = event.friendshipID {
+                sharedSpaceWindow?.model.friendTimelineEvents[friendshipID] =
+                    deduplicatedTimeline(
+                        timeline.filter { $0.friendshipID == friendshipID }
+                    )
+            }
         } catch {
             MinoLog.lifecycle.error(
                 "Timeline persistence failed: \(String(describing: error), privacy: .public)"
@@ -928,60 +1693,153 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc
-    private func walkPets() {
-        demoSequence.stop()
-        world?.walkAll()
-        recordInteractionEvent(.walk)
+    private func resetPetPositions() {
+        world?.resetPetPositions()
     }
 
-    @objc
-    private func togglePartnerAppearance() {
-        demoSequence.stop()
-        world?.togglePartnerAppearance()
-    }
-
-    @objc
-    private func kissPets() {
-        demoSequence.stop()
-        world?.triggerKiss()
-        recordInteractionEvent(.kiss)
-    }
-
-    @objc
-    private func giveFlower() {
-        demoSequence.stop()
-        world?.triggerFlowerGift()
-        recordInteractionEvent(.flowerGift)
-    }
-
-    @objc
-    private func resetDemo() {
-        demoSequence.stop()
-        world?.resetForDemo()
-    }
-
-    private func hostVisitingFriendPetIfNeeded(in world: PetWorld) {
-        guard world.pets[.partner] == nil else { return }
+    private func visitingFriendPetState(
+        for visit: Visit?,
+        in world: PetWorld
+    ) -> PetRuntimeState {
         let identity = runtimeIdentity
+        let friend = visit.flatMap(friendProfile(for:)) ?? selectedFriendProfile
         let anchor = world.pets[.mine]?.position
             ?? CGPoint(x: NSScreen.main?.visibleFrame.midX ?? 720, y: 105)
-        world.setVisiblePet(
-            PetRuntimeState(
-                id: .partner,
-                displayName: selectedFriendProfile?.petName
-                    ?? identity.fallbackFriendPetName,
-                position: CGPoint(x: anchor.x + 190, y: anchor.y),
-                facing: .left,
-                activity: .idle,
-                emotion: .content,
-                avatar: identity.fallbackFriendAvatar
-            ),
-            for: .partner
+        return PetRuntimeState(
+            id: .partner,
+            displayName: friend?.petName ?? identity.fallbackFriendPetName,
+            position: CGPoint(x: anchor.x + 190, y: anchor.y),
+            facing: .left,
+            activity: .idle,
+            emotion: .content,
+            avatar: identity.fallbackFriendAvatar,
+            characterID: friend.flatMap {
+                sharedSpaceWindow?.model.friendCharacterIDs[$0.petID]
+            } ?? fallbackFriendCharacter
         )
     }
 
-    private func ensureLocalPetVisible() {
-        guard let world, world.pets[.mine] == nil else { return }
+    private func announceVisitArrival() {
+        guard let visit = activeIncomingVisit,
+              announcedIncomingVisitID != visit.id,
+              let world else { return }
+        announcedIncomingVisitID = visit.id
+        let state = visitingFriendPetState(for: visit, in: world)
+        world.animatePetEntering(
+            state,
+            beside: .mine,
+            from: .nearest,
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        ) { [weak self] in
+            guard let self, self.activeIncomingVisit?.id == visit.id else { return }
+            self.petWindows[.partner]?.showSpeech("我来串门啦，一起玩吧。", duration: 2.4)
+            self.world?.performLocalActivity(
+                .partner,
+                activity: .celebrating,
+                emotion: .excited,
+                duration: 1.15,
+                motionClip: .welcome
+            )
+            self.world?.performLocalActivity(
+                .mine,
+                activity: .celebrating,
+                emotion: .happy,
+                duration: 1.15,
+                motionClip: .happy
+            )
+        }
+    }
+
+    private func announceVisitDeparture(
+        for petID: PetID,
+        completion: (() -> Void)? = nil
+    ) {
+        petWindows[petID]?.showSpeech("今天玩得很开心，下次见。", duration: 2.4)
+        guard let world else {
+            completion?()
+            return
+        }
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let waveDuration = reduceMotion ? 0.18 : 0.9
+        world.performLocalActivity(
+            petID,
+            activity: .celebrating,
+            emotion: .happy,
+            duration: waveDuration,
+            motionClip: .wave
+        )
+        Task { @MainActor [weak world] in
+            try? await Task.sleep(for: .seconds(waveDuration))
+            world?.animatePetExiting(
+                petID,
+                toward: .nearest,
+                reduceMotion: reduceMotion,
+                completion: completion
+            )
+        }
+    }
+
+    private func animateVisitDeparture(for petID: PetID) async {
+        await withCheckedContinuation { continuation in
+            announceVisitDeparture(for: petID) {
+                continuation.resume()
+            }
+        }
+    }
+
+    private func animateOwnPetLeavingForVisit() {
+        guard let visitID = activeOutgoingVisit?.id else { return }
+        departingOwnPetVisitID = visitID
+        petWindows[.mine]?.showSpeech("我去串门啦，晚点回来。", duration: 2.4)
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let waveDuration = reduceMotion ? 0.18 : 0.9
+        world?.performLocalActivity(
+            .mine,
+            activity: .celebrating,
+            emotion: .happy,
+            duration: waveDuration,
+            motionClip: .wave
+        )
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(waveDuration))
+            guard let self, self.departingOwnPetVisitID == visitID else { return }
+            world?.animatePetExiting(
+                .mine,
+                toward: .nearest,
+                reduceMotion: reduceMotion
+            ) { [weak self] in
+                guard let self,
+                      self.departingOwnPetVisitID == visitID,
+                      self.activeOutgoingVisit?.status == .active else { return }
+                self.departingOwnPetVisitID = nil
+                self.world?.setVisiblePet(nil, for: .mine)
+            }
+        }
+    }
+
+    private func animateOwnPetReturningHome() {
+        guard let world else { return }
+        departingOwnPetVisitID = nil
+        let state = localPetRuntimeState()
+        world.animatePetEntering(
+            state,
+            toward: state.position,
+            from: .nearest,
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        ) { [weak self] in
+            guard let self else { return }
+            self.petWindows[.mine]?.showSpeech("我回来啦，给你带了故事。", duration: 2.4)
+            self.world?.performLocalActivity(
+                .mine,
+                activity: .celebrating,
+                emotion: .happy,
+                duration: 1.15,
+                motionClip: .welcome
+            )
+        }
+    }
+
+    private func localPetRuntimeState() -> PetRuntimeState {
         let fullFrame = NSScreen.main?.visibleFrame
             ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         let frame = Self.visibleFrame(
@@ -989,35 +1847,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             constrainedTo: services.configuration.clientProfile.screenRegion
         )
         let identity = runtimeIdentity
-        world.setVisiblePet(
-            PetRuntimeState(
-                id: .mine,
-                displayName: identity.localPetName,
-                position: CGPoint(x: frame.midX, y: frame.minY + 105),
-                facing: .right,
-                activity: .idle,
-                emotion: .content,
-                avatar: identity.localAvatar
-            ),
-            for: .mine
+        return PetRuntimeState(
+            id: .mine,
+            displayName: identity.localPetName,
+            position: CGPoint(x: frame.midX, y: frame.minY + 105),
+            facing: .right,
+            activity: .idle,
+            emotion: .content,
+            avatar: identity.localAvatar,
+            characterID: ownPetCharacterID
         )
+    }
+
+    private func ensureLocalPetVisible() {
+        guard let world, world.pets[.mine] == nil else { return }
+        world.setVisiblePet(localPetRuntimeState(), for: .mine)
+    }
+
+    private var runtimeDefaultCharacter: PetCharacterID {
+        services.configuration.clientProfile.id == "bob"
+            ? .retrieverYellow
+            : .malteseWhite
+    }
+
+    private var fallbackFriendCharacter: PetCharacterID {
+        runtimeDefaultCharacter == .malteseWhite ? .retrieverYellow : .malteseWhite
+    }
+
+    private var ownPetCharacterID: PetCharacterID {
+        sharedSpaceWindow?.model.ownPetCharacterID ?? runtimeDefaultCharacter
+    }
+
+    private func applyOwnPetCharacter(_ characterID: PetCharacterID) {
+        sharedSpaceWindow?.model.ownPetCharacterID = characterID
+        sharedSpaceWindow?.model.friendCharacterIDs[currentProfile.petID] = characterID
+        if world?.pets[.mine] == nil, activeOutgoingVisit == nil {
+            world?.setVisiblePet(localPetRuntimeState(), for: .mine)
+        } else {
+            world?.setCharacter(characterID, for: .mine)
+        }
     }
 
     private var runtimeIdentity: RuntimePetIdentity {
         switch services.configuration.clientProfile.id {
         case "bob":
             RuntimePetIdentity(
-                localPetName: "团子",
+                localPetName: currentProfile.petName,
                 fallbackFriendPetName: "奶糖",
                 localAvatar: .partner,
                 fallbackFriendAvatar: .mine
             )
         default:
             RuntimePetIdentity(
-                localPetName: "奶糖",
+                localPetName: currentProfile.petName,
                 fallbackFriendPetName: "团子",
                 localAvatar: .mine,
                 fallbackFriendAvatar: .partner
+            )
+        }
+    }
+
+    private static func defaultProfile(
+        for runtimeProfile: ClientRuntimeProfile
+    ) -> CurrentProfile {
+        switch runtimeProfile.id {
+        case "alice":
+            CurrentProfile(
+                accountID: AccountID(rawValue: "00000000-0000-4000-8000-00000000000a"),
+                petID: PetProfileID(rawValue: "00000000-0000-4000-8000-0000000000a1"),
+                accountName: "Alice",
+                petName: "奶糖",
+                createdAt: Date(timeIntervalSince1970: 0)
+            )
+        case "bob":
+            CurrentProfile(
+                accountID: AccountID(rawValue: "00000000-0000-4000-8000-00000000000b"),
+                petID: PetProfileID(rawValue: "00000000-0000-4000-8000-0000000000b1"),
+                accountName: "Bob",
+                petName: "团子",
+                createdAt: Date(timeIntervalSince1970: 0)
+            )
+        default:
+            CurrentProfile(
+                accountID: AccountID(rawValue: "local-account"),
+                petID: PetProfileID(rawValue: "local-pet"),
+                accountName: "我的 Mino",
+                petName: "奶糖",
+                createdAt: Date()
             )
         }
     }
@@ -1033,7 +1949,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var isSocialMVPConfigured: Bool {
         services.configuration.backend.mode == .remote
-            && services.configuration.clientProfile != .standard
     }
 
     private static func visibleFrame(
@@ -1062,113 +1977,207 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func screenConfigurationChanged() {
-        demoSequence.stop()
         world?.restorePetsToVisibleScreens()
+    }
+
+    @objc
+    private func systemDidWake() {
+        accountEventSyncCoordinator?.requestCatchUp()
     }
 
     private func startSocialMVPIfConfigured() {
         guard services.configuration.backend.mode == .remote else { return }
         let runtimeProfile = services.configuration.clientProfile
-        guard runtimeProfile != .standard else {
-            // Normal account sign-in is outside this internal MVP. Never fall
-            // back to the removed fixed-relationship presence model.
-            return
-        }
+        sharedSpaceWindow?.model.cloudSyncState = .connecting
 
         socialBootstrapTask?.cancel()
         socialBootstrapTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let profile = try await services.backend.bootstrapDevelopmentProfile(
-                    runtimeProfile.id
-                )
-                developmentProfile = profile
-                try await services.sessionStore.save(
-                    SessionCredential(
-                        accountID: profile.accountID,
-                        accessToken: profile.token,
-                        refreshToken: nil,
-                        accessTokenExpiresAt: .distantFuture,
-                        issuedAt: Date()
-                    )
-                )
-                sharedSpaceWindow?.model.localAccountID = profile.accountID
-                try await refreshFriendDirectory()
-                let agentFriends = (sharedSpaceWindow?.model.friends ?? []).map {
-                    AgentFriend(
-                        friendshipID: $0.friendshipID,
-                        accountID: $0.accountID,
-                        petID: $0.petID
-                    )
-                }
-
-                let memoryStore: any AgentMemoryStore
-                if let fileURL = services.agentMemoryFileURL {
-                    let key = try await services.agentMemoryKeyStore.loadOrCreateKey()
-                    memoryStore = EncryptedFileAgentMemoryStore(
-                        fileURL: fileURL,
-                        key: key,
-                        capacity: 200
-                    )
-                } else {
-                    memoryStore = InMemoryAgentMemoryStore(capacity: 200)
-                }
-                agentMemoryStore = memoryStore
-
-                let modelClient = HTTPManagedModelClient(
-                    endpoint: try modelDecisionEndpoint(),
-                    tokenProvider: AgentSessionTokenProvider(store: services.sessionStore)
-                )
-                let identity = AgentIdentity(
-                    petID: profile.petID,
-                    ownerAccountID: profile.accountID,
-                    displayName: profile.petName,
-                    friends: agentFriends
-                )
-                let localAgent = LocalPetAgent(
-                    identity: identity,
-                    modelClient: modelClient,
-                    memoryStore: memoryStore
-                )
-                let conversations = ConversationCoordinator(backend: services.backend)
-                let visits = VisitCoordinator(backend: services.backend)
-                let agent = AgentCoordinator(
-                    identity: identity,
-                    agent: localAgent,
-                    conversations: conversations,
-                    visits: visits,
-                    onOwnerSpeech: { [weak self] text in
-                        self?.sharedSpaceWindow?.model.agentMessage = text
-                    },
-                    onReaction: { [weak self] reaction in
-                        self?.applyAgentReaction(reaction)
-                    },
-                    onFailure: { error in
-                        MinoLog.backend.error(
-                            "Agent action delivery failed: \(String(describing: error), privacy: .public)"
-                        )
+                let profile: DevBootstrapProfile
+                if runtimeProfile == .standard {
+                    guard let credential = try await validStandardCredential() else {
+                        sharedSpaceWindow?.model.authenticationState = .signedOut
+                        sharedSpaceWindow?.model.cloudSyncState = .localOnly
+                        visitInvitationWindow?.dismissAll()
+                        return
                     }
-                )
-                conversationCoordinator = conversations
-                socialVisitCoordinator = visits
-                agentCoordinator = agent
-
-                try await restoreSocialConversationState(agent: agent)
-                try await restoreSocialVisitState(
-                    profile: profile,
-                    visits: visits,
-                    agent: agent
-                )
-
-                reconcileEventSyncCoordinators()
-                startAgentWakeLoop(agent)
+                    let bootstrap = try await services.backend.fetchSyncBootstrap()
+                    profile = DevBootstrapProfile(
+                        profile: "standard",
+                        token: credential.accessToken,
+                        refreshToken: credential.refreshToken ?? "",
+                        accountID: bootstrap.account.id,
+                        deviceID: bootstrap.currentDevice.id,
+                        petID: bootstrap.pet.petID,
+                        accountName: bootstrap.account.displayName,
+                        petName: bootstrap.pet.displayName
+                    )
+                    sharedSpaceWindow?.model.authenticationState = .signedIn
+                } else {
+                    profile = try await services.backend.bootstrapDevelopmentProfile(
+                        runtimeProfile.id
+                    )
+                    try await services.sessionStore.save(
+                        SessionCredential(
+                            accountID: profile.accountID,
+                            deviceID: profile.deviceID,
+                            accessToken: profile.token,
+                            refreshToken: profile.refreshToken,
+                            accessTokenExpiresAt: .distantFuture,
+                            issuedAt: Date()
+                        )
+                    )
+                }
+                developmentProfile = profile
+                try await initializeSocialRuntime(profile: profile)
             } catch {
-                sharedSpaceWindow?.model.visitErrorMessage = "MVP 初始化失败，请确认本地服务已启动"
+                if case BackendClientError.httpStatus(let statusCode, _) = error,
+                   statusCode == 401 {
+                    try? await services.sessionStore.clear()
+                    stopSocialRuntime()
+                    applyCurrentProfile(Self.defaultProfile(for: .standard))
+                    sharedSpaceWindow?.model.authenticationState = .signedOut
+                    sharedSpaceWindow?.model.cloudSyncState = .localOnly
+                    sharedSpaceWindow?.model.visitErrorMessage = nil
+                } else {
+                    sharedSpaceWindow?.model.cloudSyncState = .unavailable
+                    sharedSpaceWindow?.model.visitErrorMessage = "云端暂不可用，已保留当前内容"
+                }
                 MinoLog.backend.error(
-                    "Social MVP bootstrap failed: \(String(describing: error), privacy: .public)"
+                    "Social account bootstrap failed: \(String(describing: error), privacy: .public)"
                 )
             }
         }
+    }
+
+    private func validStandardCredential() async throws -> SessionCredential? {
+        guard var credential = try await services.sessionStore.load() else { return nil }
+        if credential.needsRefresh() {
+            guard let refreshToken = credential.refreshToken, !refreshToken.isEmpty else {
+                try await services.sessionStore.clear()
+                return nil
+            }
+            let session = try await services.backend.refreshSession(refreshToken)
+            credential = sessionCredential(from: session)
+            try await services.sessionStore.save(credential)
+        }
+        return credential
+    }
+
+    private func initializeSocialRuntime(profile: DevBootstrapProfile) async throws {
+        let remoteProfile = try await services.backend.fetchCurrentProfile()
+        applyCurrentProfile(remoteProfile)
+        try await refreshFriendDirectory()
+        let agentFriends = (sharedSpaceWindow?.model.friends ?? []).map {
+            AgentFriend(
+                friendshipID: $0.friendshipID,
+                accountID: $0.accountID,
+                petID: $0.petID
+            )
+        }
+
+        let memoryStore: any AgentMemoryStore
+        if let fileURL = services.agentMemoryFileURL {
+            let key = try await services.agentMemoryKeyStore.loadOrCreateKey()
+            memoryStore = EncryptedFileAgentMemoryStore(
+                fileURL: fileURL,
+                key: key,
+                capacity: 200
+            )
+        } else {
+            memoryStore = InMemoryAgentMemoryStore(capacity: 200)
+        }
+        agentMemoryStore = memoryStore
+
+        let modelClient = HTTPManagedModelClient(
+            endpoint: try modelDecisionEndpoint(),
+            tokenProvider: AgentSessionTokenProvider(store: services.sessionStore)
+        )
+        let identity = AgentIdentity(
+            petID: profile.petID,
+            ownerAccountID: profile.accountID,
+            displayName: remoteProfile.petName,
+            friends: agentFriends
+        )
+        let localAgent = LocalPetAgent(
+            identity: identity,
+            modelClient: modelClient,
+            memoryStore: memoryStore
+        )
+        let conversations = ConversationCoordinator(
+            backend: services.backend,
+            outbox: services.socialMutationOutbox
+        )
+        let visits = VisitCoordinator(
+            backend: services.backend,
+            outbox: services.socialMutationOutbox
+        )
+        let agent = AgentCoordinator(
+            identity: identity,
+            agent: localAgent,
+            conversations: conversations,
+            visits: visits,
+            onOwnerSpeech: { [weak self] text in
+                self?.sharedSpaceWindow?.model.agentMessage = text
+            },
+            onReaction: { [weak self] reaction in
+                self?.applyAgentReaction(reaction)
+            },
+            onFailure: { error in
+                MinoLog.backend.error(
+                    "Agent action delivery failed: \(String(describing: error), privacy: .public)"
+                )
+            }
+        )
+        conversationCoordinator = conversations
+        socialVisitCoordinator = visits
+        agentCoordinator = agent
+
+        try await restoreSocialConversationState(agent: agent)
+        try await restoreSocialVisitState(
+            profile: profile,
+            visits: visits,
+            agent: agent
+        )
+
+        startAccountEventSync()
+        startSocialOutboxRetryLoop(visits)
+    }
+
+    private func stopSocialRuntime() {
+        socialBootstrapTask?.cancel()
+        accountEventSyncCoordinator?.stop()
+        accountEventSyncCoordinator = nil
+        socialOutboxRetryTask?.cancel()
+        conversationCoordinator = nil
+        socialVisitCoordinator = nil
+        agentCoordinator = nil
+        agentMemoryStore = nil
+        visitProjectionReducer = nil
+        developmentProfile = nil
+        activeIncomingVisit = nil
+        activeOutgoingVisit = nil
+        pendingVisits = [:]
+        optimisticallyReturningVisitIDs.removeAll()
+        departingOwnPetVisitID = nil
+        visitInvitationWindow?.dismissAll()
+        isPrimaryAgentDevice = false
+        sharedSpaceWindow?.model.friends = []
+        sharedSpaceWindow?.model.friendRequests = []
+        sharedSpaceWindow?.model.timelineEvents = []
+        sharedSpaceWindow?.model.friendCharacterIDs = [:]
+        sharedSpaceWindow?.model.ownPetCharacterID =
+            services.configuration.clientProfile == .standard
+            ? nil
+            : runtimeDefaultCharacter
+        sharedSpaceWindow?.model.petCharacterSelectionState = .hidden
+        sharedSpaceWindow?.model.activeVisitFriendshipID = nil
+        sharedSpaceWindow?.model.visitState = .away
+        sharedSpaceWindow?.model.cloudSyncState = .localOnly
+        world?.setVisiblePet(nil, for: .partner)
+        world?.setCharacter(runtimeDefaultCharacter, for: .mine)
+        ensureLocalPetVisible()
     }
 
     private func modelDecisionEndpoint() throws -> URL {
@@ -1181,21 +2190,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .appendingPathComponent("decision", isDirectory: false)
     }
 
-    private func startAgentWakeLoop(_ agent: AgentCoordinator) {
-        agentWakeTask?.cancel()
-        let profileID = services.configuration.clientProfile.id
-        let initialDelay: Duration = profileID == "bob" ? .seconds(48) : .seconds(15)
-        let repeatDelay: Duration = .seconds(90)
-        agentWakeTask = Task {
-            do {
-                try await Task.sleep(for: initialDelay)
-            } catch {
-                return
-            }
+    private func startSocialOutboxRetryLoop(_ visits: VisitCoordinator) {
+        socialOutboxRetryTask?.cancel()
+        socialOutboxRetryTask = Task {
             while !Task.isCancelled {
-                await agent.observe(AgentObservation(kind: .periodicWake))
+                await visits.retryPendingMutations()
                 do {
-                    try await Task.sleep(for: repeatDelay)
+                    try await Task.sleep(for: .seconds(30))
                 } catch {
                     return
                 }
@@ -1211,7 +2212,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         visits: VisitCoordinator,
         agent: AgentCoordinator
     ) async throws {
-        let activeVisits = try await fetchVisitsAcrossFriends(status: .active)
+        async let activeRequest = fetchVisitsAcrossFriends(status: .active)
+        async let pendingRequest = fetchVisitsAcrossFriends(status: .pending)
+        let (activeVisits, restoredPendingVisits) = try await (activeRequest, pendingRequest)
+        pendingVisits = Dictionary(uniqueKeysWithValues: restoredPendingVisits.map { ($0.id, $0) })
+        for visit in restoredPendingVisits {
+            await visits.apply(visit)
+        }
+        refreshVisitInvitationQueue()
         for visit in activeVisits {
             await visits.apply(visit)
             await agent.applyVisit(visit)
@@ -1227,86 +2235,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 activeIncomingVisit = nil
                 world?.setVisiblePet(nil, for: .mine)
                 sharedSpaceWindow?.model.visitState = .ownPetVisiting
-                await agent.observe(
-                    AgentObservation(
-                        id: visitStartedObservationID(active.id),
-                        occurredAt: active.startedAt ?? active.createdAt,
-                        kind: .visitStarted(
-                            visitID: active.id,
-                            hostAccountID: active.hostAccountID
-                        )
-                    )
-                )
             } else {
                 activeIncomingVisit = active
                 activeOutgoingVisit = nil
-                if let world { hostVisitingFriendPetIfNeeded(in: world) }
-                world?.setWaitingForRemoteAgent(.partner, isWaiting: true)
+                announceVisitArrival()
                 sharedSpaceWindow?.model.visitState = .visiting
             }
             return
         }
 
-        let pendingVisits = try await fetchVisitsAcrossFriends(status: .pending)
-        guard let pending = pendingVisits.first(where: {
+        guard let pending = restoredPendingVisits
+            .sorted(by: { $0.createdAt < $1.createdAt })
+            .first(where: {
             $0.visitorPetID == profile.petID || $0.hostAccountID == profile.accountID
         }) else {
             return
         }
-        await visits.apply(pending)
         sharedSpaceWindow?.model.activeVisitFriendshipID =
             friendProfile(for: pending)?.friendshipID
-        if pending.visitorPetID == profile.petID {
-            activeOutgoingVisit = pending
-        } else {
-            activeIncomingVisit = pending
-        }
 
-        let responderAccountID = pending.requestedByAccountID == pending.visitorOwnerAccountID
-            ? pending.hostAccountID
-            : pending.visitorOwnerAccountID
-        guard responderAccountID == profile.accountID else {
+        guard pending.responderAccountID == profile.accountID else {
             sharedSpaceWindow?.model.visitState = .invitationSent
             return
         }
 
         sharedSpaceWindow?.model.visitState = .consideringInvitation
-        guard let senderPetID = friendPetID(for: pending, localPetID: profile.petID) else {
-            return
-        }
-        await agent.observe(
-            AgentObservation(
-                id: UUID(uuidString: pending.id.rawValue) ?? UUID(),
-                occurredAt: pending.createdAt,
-                kind: .visitInvitation(
-                    invitationID: PetVisitInvitationID(rawValue: pending.id.rawValue),
-                    senderPetID: senderPetID,
-                    reason: pending.reason
-                )
-            )
-        )
     }
 
-    private func fetchVisitsAcrossFriends(
-        status: MVPVisitStatus
-    ) async throws -> [MVPVisit] {
-        let backend = services.backend
-        let friendshipIDs = Array(acceptedFriendshipIDs)
-        return try await withThrowingTaskGroup(of: [MVPVisit].self) { group in
-            for friendshipID in friendshipIDs {
-                group.addTask {
-                    try await backend.fetchVisitInvitations(
-                        friendshipID: friendshipID,
-                        status: status
-                    )
-                }
-            }
-            var visits: [MVPVisit] = []
-            for try await result in group {
-                visits.append(contentsOf: result)
-            }
-            return visits
-        }
+    private func fetchVisitsAcrossFriends(status: VisitStatus) async throws -> [Visit] {
+        try await services.backend.fetchVisits(status: status)
     }
 
     /// Restores each friend's active conversation and bounded transcript before
@@ -1314,372 +2271,482 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func restoreSocialConversationState(
         agent: AgentCoordinator
     ) async throws {
-        for friendshipID in acceptedFriendshipIDs {
-            let active = try await services.backend.fetchConversations(
-                friendshipID: friendshipID,
-                status: .active
-            )
-            .sorted { $0.createdAt > $1.createdAt }
-            .first
-            guard let active else { continue }
+        let activeConversations = try await services.backend.fetchConversations()
+        for active in activeConversations {
             let messages = try await services.backend.fetchConversationMessages(
-                friendshipID: friendshipID,
                 conversationID: active.id
             )
             await agent.restoreConversation(active, messages: messages)
         }
     }
 
-    private func reconcileEventSyncCoordinators() {
-        let acceptedIDs = acceptedFriendshipIDs
-        for friendshipID in Array(eventSyncCoordinators.keys)
-        where !acceptedIDs.contains(friendshipID) {
-            eventSyncCoordinators.removeValue(forKey: friendshipID)?.stop()
-        }
-        for friendshipID in acceptedIDs where eventSyncCoordinators[friendshipID] == nil {
-            let coordinator = EventSyncCoordinator(
-                backend: services.backend,
-                realtime: services.realtimeEvents,
-                cursorStore: services.friendshipEventCursorStore,
-                friendshipID: friendshipID
-            )
-            eventSyncCoordinators[friendshipID] = coordinator
-            coordinator.start(
-                onEvent: { [weak self] event in
-                    guard let self else { return }
-                    try await self.handleFriendshipEvent(event)
-                },
-                onStatusChange: { [weak self] status in
-                    self?.sharedSpaceWindow?.model.eventSyncStatusText = switch status {
-                    case .stopped: "事件同步已暂停"
-                    case .catchingUp: "正在同步刚刚发生的事"
-                    case .realtime: "事件通道已连接"
-                    case .polling: "连接不稳，正在补收事件"
+    private func startAccountEventSync() {
+        guard let profile = developmentProfile else { return }
+        accountEventSyncCoordinator?.stop()
+        visitProjectionReducer = VisitProjectionReducer(
+            accountID: profile.accountID,
+            ownPetID: profile.petID
+        )
+        let coordinator = AccountEventSyncCoordinator(
+            accountID: profile.accountID,
+            backend: services.backend,
+            realtime: services.realtimeSignals,
+            cursorStore: services.accountEventCursorStore
+        )
+        accountEventSyncCoordinator = coordinator
+        coordinator.start(
+            onBootstrap: { [weak self] bootstrap in
+                guard let self else { return }
+                try await self.applySyncBootstrap(bootstrap)
+            },
+            onEvent: { [weak self] event in
+                guard let self else { return false }
+                return try await self.handleAccountEvent(event)
+            },
+            onStatusChange: { [weak self] status in
+                guard let self, let model = self.sharedSpaceWindow?.model else { return }
+                switch status {
+                case .stopped:
+                    if model.authenticationState == .signedOut
+                        || model.authenticationState == .offline {
+                        model.cloudSyncState = .localOnly
+                    }
+                case .bootstrapping, .catchingUp:
+                    if model.cloudSyncState != .pending {
+                        model.cloudSyncState = .connecting
+                    }
+                case .realtime, .polling:
+                    if model.cloudSyncState != .pending {
+                        model.cloudSyncState = .synced
+                    }
+                case .unavailable:
+                    if model.cloudSyncState != .pending {
+                        model.cloudSyncState = .unavailable
                     }
                 }
-            )
-        }
+            }
+        )
     }
 
     private var acceptedFriendshipIDs: Set<FriendshipID> {
         Set(sharedSpaceWindow?.model.friends.map(\.friendshipID) ?? [])
     }
 
-    private func handleFriendshipEvent(_ event: FriendshipEvent) async throws {
-        guard acceptedFriendshipIDs.contains(event.friendshipID) else { return }
-        if let timelineEvent = event.timelineEvent() {
-            await persistTimelineEvent(timelineEvent)
+    private func applySyncBootstrap(_ bootstrap: SyncBootstrap) async throws {
+        guard bootstrap.account.id == developmentProfile?.accountID else {
+            throw BackendClientError.invalidResponse
         }
-        guard let profile = developmentProfile else { return }
+        if visitProjectionReducer == nil {
+            visitProjectionReducer = VisitProjectionReducer(
+                accountID: bootstrap.account.id,
+                ownPetID: bootstrap.pet.petID
+            )
+        }
+        isPrimaryAgentDevice = bootstrap.isPrimaryAgentDevice
+        visitProjectionReducer?.reconcile(bootstrap)
+        careStates[.mine] = bootstrap.ownPetCare
+        familiarities = Dictionary(uniqueKeysWithValues: bootstrap.petFamiliarities.map {
+            ($0.friendshipID, $0)
+        })
+        await reconcileOwnPetAppearance(bootstrap.pet)
+        sharedSpaceWindow?.model.ownPetCare = bootstrap.ownPetCare
+        for friendship in bootstrap.friendships {
+            if let characterID = PetCharacterID(
+                appearance: friendship.friend.pet.appearance
+            ) {
+                sharedSpaceWindow?.model.friendCharacterIDs[
+                    friendship.friend.pet.petID
+                ] = characterID
+            }
+            if let publicCare = friendship.friend.pet.publicCare {
+                updateFriendCare(
+                    friendshipID: friendship.id,
+                    publicCare: publicCare,
+                    familiarity: friendship.familiarity
+                )
+            }
+        }
+        if let visitorPetID = activeIncomingVisit?.visitorPetID,
+           let visitorCharacter = sharedSpaceWindow?.model.friendCharacterIDs[visitorPetID] {
+            world?.setCharacter(visitorCharacter, for: .partner)
+        }
+        for conversation in bootstrap.activeConversations {
+            await agentCoordinator?.applyConversation(conversation)
+        }
+        try await applyVisitProjection()
+        if sharedSpaceWindow?.model.cloudSyncState != .pending {
+            sharedSpaceWindow?.model.cloudSyncState = .synced
+        }
+    }
 
+    private func reconcileOwnPetAppearance(_ snapshot: PublicPetSnapshot) async {
+        guard let model = sharedSpaceWindow?.model else { return }
+        if let authoritative = PetCharacterID(appearance: snapshot.appearance) {
+            let previous = model.petCharacterSelectionState
+            applyOwnPetCharacter(authoritative)
+            switch previous {
+            case .saving(let selected), .pendingSync(let selected):
+                model.petCharacterSelectionState = selected == authoritative
+                    ? .confirmed(authoritative)
+                    : .conflict(authoritative: authoritative)
+            case .failed(let selected?, _):
+                model.petCharacterSelectionState = selected == authoritative
+                    ? .confirmed(authoritative)
+                    : .conflict(authoritative: authoritative)
+            case .confirmed, .conflict:
+                break
+            case .hidden, .required, .failed:
+                model.petCharacterSelectionState = .hidden
+            }
+            return
+        }
+
+        if let pending = try? await pendingPetCharacterSelection() {
+            applyOwnPetCharacter(pending)
+            model.petCharacterSelectionState = .pendingSync(pending)
+            model.cloudSyncState = .pending
+            return
+        }
+
+        if services.configuration.clientProfile == .standard,
+           model.authenticationState == .signedIn {
+            model.ownPetCharacterID = nil
+            model.petCharacterSelectionState = .required()
+            world?.setVisiblePet(nil, for: .mine)
+        } else {
+            applyOwnPetCharacter(runtimeDefaultCharacter)
+            model.petCharacterSelectionState = .hidden
+        }
+    }
+
+    private func pendingPetCharacterSelection() async throws -> PetCharacterID? {
+        let mutations = try await services.socialMutationOutbox.due(at: .distantFuture)
+        for mutation in mutations.reversed()
+        where mutation.kind == .petAppearanceSelection {
+            guard case .object(let appearance)? = mutation.body["appearance"],
+                  let rigID = appearance["rigID"]?.stringValue,
+                  let body = appearance["body"]?.stringValue
+            else { continue }
+            if let characterID = PetCharacterID(
+                appearance: ["rigID": rigID, "body": body]
+            ) {
+                return characterID
+            }
+        }
+        return nil
+    }
+
+    private func handleAccountEvent(_ event: AccountEvent) async throws -> Bool {
+        guard event.recipientAccountID == developmentProfile?.accountID else { return true }
+        if let timeline = event.timelineEvent() {
+            await persistTimelineEvent(timeline)
+        }
+        guard var reducer = visitProjectionReducer else { return true }
+        let result = reducer.apply(event)
+        visitProjectionReducer = reducer
+        switch result {
+        case .duplicate:
+            return false
+        case .requiresBootstrap:
+            return true
+        case .applied:
+            break
+        }
+
+        try await applyVisitProjection()
         switch event.type {
-        case "conversation_message":
-            guard
-                payloadString(event, "recipientPetID") == profile.petID.rawValue,
-                let text = payloadString(event, "text"),
-                let conversationID = payloadString(event, "conversationID")
-            else { return }
-            let observation: AgentObservation
-            if event.actorType == .human,
-               let actorID = event.actorID {
-                observation = AgentObservation(
-                    id: observationID(for: event),
-                    occurredAt: event.occurredAt,
-                    kind: .remoteHumanMessage(
-                        senderAccountID: AccountID(rawValue: actorID),
-                        text: text
-                    )
-                )
-            } else if event.actorType == .pet,
-                      let actorID = event.actorID,
-                      actorID != profile.petID.rawValue {
-                observation = AgentObservation(
-                    id: observationID(for: event),
-                    occurredAt: event.occurredAt,
-                    kind: .petMessage(
-                        senderPetID: PetProfileID(rawValue: actorID),
-                        text: text
-                    )
-                )
-            } else {
-                return
-            }
-            if let agentCoordinator {
-                let typedConversationID = ConversationID(rawValue: conversationID)
-                let turnIndex = event.payload["turnIndex"]?.numberValue.map(Int.init)
-                await agentCoordinator.recordConversationMessage(
-                    conversationID: typedConversationID,
-                    actorType: event.actorType,
-                    actorID: event.actorID ?? "unknown",
-                    recipientPetID: profile.petID,
-                    turnIndex: turnIndex,
-                    text: text
-                )
-                if event.actorType == .pet,
-                   (turnIndex ?? -1) >= 5 {
-                    try await agentCoordinator.finishConversation(
-                        friendshipID: event.friendshipID,
-                        conversationID: typedConversationID,
-                        occurredAt: event.occurredAt
-                    )
-                    return
-                }
-                await agentCoordinator.setActiveConversationID(
-                    typedConversationID,
-                    for: event.friendshipID
-                )
-                try await agentCoordinator.observeEvent(observation)
+        case "friendship.requested", "friendship.accepted", "friendship.rejected", "friendship.closed":
+            try? await refreshFriendDirectory()
+
+        case "visit.requested":
+            // Visit invitations are always decided by the human recipient.
+            if let visit: Visit = decodePayload(event.payload["visit"]),
+               visit.responderAccountID == developmentProfile?.accountID {
+                sharedSpaceWindow?.model.visitState = .consideringInvitation
             }
 
-        case "conversation_summary":
-            if let summary = payloadString(event, "summary") {
+        case "visit.activated":
+            break
+
+        case "visit.closed":
+            break
+
+        case "visit.action.created":
+            // Kept for wire compatibility. New care interactions never wait for
+            // another device or an Agent response.
+            break
+
+        case "visit.action.replied":
+            if let action: VisitAction = decodePayload(event.payload["action"]) {
+                applyVisitActionReply(action)
+            }
+
+        case "conversation.message.created":
+            if isPrimaryAgentDevice,
+               let receipt: ConversationTurnReceipt = decodePayload(event.payload) {
+                try await handleConversationReceipt(receipt, event: event)
+            }
+
+        case "conversation.ended":
+            if let summary = event.payload["summary"]?.stringValue {
                 sharedSpaceWindow?.model.agentMessage = summary
             }
-            if let agentCoordinator {
-                await agentCoordinator.setActiveConversationID(
-                    nil,
-                    for: event.friendshipID
-                )
+            if let conversation: PetConversation = decodePayload(event.payload["conversation"]) {
+                await agentCoordinator?.setActiveConversationID(nil, for: conversation.friendshipID)
             }
 
-        case "visit_invited":
-            guard let visit = makeVisit(from: event, status: .pending, profile: profile) else {
-                return
-            }
-            await socialVisitCoordinator?.apply(visit)
-            sharedSpaceWindow?.model.activeVisitFriendshipID =
-                friendProfile(for: visit)?.friendshipID
-            if visit.visitorPetID == profile.petID {
-                activeOutgoingVisit = visit
-            } else if visit.hostAccountID == profile.accountID {
-                activeIncomingVisit = visit
-            }
-
-            let responderAccountID = payloadString(event, "responderAccountID")
-                .map(AccountID.init(rawValue:))
-                ?? (visit.requestedByAccountID == visit.visitorOwnerAccountID
-                    ? visit.hostAccountID
-                    : visit.visitorOwnerAccountID)
-            if responderAccountID == profile.accountID,
-               let agentCoordinator,
-               let senderPetID = friendPetID(for: visit, localPetID: profile.petID) {
-                sharedSpaceWindow?.model.visitState = .consideringInvitation
-                sharedSpaceWindow?.model.agentMessage =
-                    "\(profile.petName) 正在考虑这个串门提议"
-                let observation = AgentObservation(
-                    id: UUID(uuidString: visit.id.rawValue) ?? observationID(for: event),
-                    occurredAt: event.occurredAt,
-                    kind: .visitInvitation(
-                        invitationID: PetVisitInvitationID(rawValue: visit.id.rawValue),
-                        senderPetID: senderPetID,
-                        reason: visit.reason
-                    )
-                )
-                await agentCoordinator.applyVisit(visit)
-                try await agentCoordinator.observeEvent(observation)
-            } else {
-                sharedSpaceWindow?.model.visitState = .invitationSent
-            }
-
-        case "visit_arrived":
-            guard let visit = makeVisit(from: event, status: .active, profile: profile) else {
-                return
-            }
-            await socialVisitCoordinator?.apply(visit)
-            sharedSpaceWindow?.model.activeVisitFriendshipID =
-                friendProfile(for: visit)?.friendshipID
-            if visit.visitorPetID == profile.petID {
-                activeOutgoingVisit = visit
-                world?.setVisiblePet(nil, for: .mine)
-                sharedSpaceWindow?.model.visitState = .ownPetVisiting
-                if let agentCoordinator {
-                    let observation = AgentObservation(
-                        id: visitStartedObservationID(visit.id),
-                        occurredAt: event.occurredAt,
-                        kind: .visitStarted(
-                            visitID: visit.id,
-                            hostAccountID: visit.hostAccountID
-                        )
-                    )
-                    await agentCoordinator.applyVisit(visit)
-                    try await agentCoordinator.observeEvent(observation)
-                }
-            } else if visit.hostAccountID == profile.accountID {
-                activeIncomingVisit = visit
-                if let world { hostVisitingFriendPetIfNeeded(in: world) }
-                world?.setWaitingForRemoteAgent(.partner, isWaiting: true)
-                sharedSpaceWindow?.model.visitState = .visiting
-            }
-
-        case "visit_declined":
-            guard let visit = makeVisit(from: event, status: .cancelled, profile: profile) else {
-                return
-            }
-            await socialVisitCoordinator?.apply(visit)
-            if visit.visitorPetID == profile.petID {
-                activeOutgoingVisit = nil
-                ensureLocalPetVisible()
-            }
-            if activeIncomingVisit?.id == visit.id {
-                activeIncomingVisit = nil
-            }
-            sharedSpaceWindow?.model.visitState = .away
-            sharedSpaceWindow?.model.activeVisitFriendshipID = nil
-            if let agentCoordinator {
-                await agentCoordinator.applyVisit(visit)
-            }
-
-        case "visit_interaction":
-            guard
-                payloadString(event, "visitorPetID") == profile.petID.rawValue,
-                let rawKind = payloadString(event, "kind"),
-                let kind = VisitInteractionKind(rawValue: rawKind),
-                let visitID = payloadString(event, "visitID")
-            else { return }
-            let stimulus: PetInteractionStimulus
-            switch kind {
-            case .feed: stimulus = .feeding(foodName: nil)
-            case .play: stimulus = .play
-            case .message:
-                guard let text = payloadString(event, "text") else { return }
-                stimulus = .message(text: text)
-            }
-            let actorID = event.actorID.map(AccountID.init(rawValue:))
-                ?? selectedFriendProfile?.accountID
-                ?? profile.accountID
-            let observation = AgentObservation(
-                id: observationID(for: event),
-                occurredAt: event.occurredAt,
-                kind: .visitInteraction(
-                    visitID: PetVisitID(rawValue: visitID),
-                    actorAccountID: actorID,
-                    stimulus: stimulus
-                )
-            )
-            if let agentCoordinator {
-                try await agentCoordinator.observeEvent(observation)
-            }
-
-        case "visit_reaction":
-            guard
-                payloadString(event, "visitorPetID") == activeIncomingVisit?.visitorPetID.rawValue,
-                let rawReaction = payloadString(event, "reaction"),
-                let reaction = PetReaction(rawValue: rawReaction)
-            else { return }
-            let remainsSleepy = reaction == .sleepy || reaction == .resting
-            world?.setWaitingForRemoteAgent(.partner, isWaiting: remainsSleepy)
-            switch reaction {
-            case .happy, .excited, .grateful, .playful:
-                world?.setPetEmotion(.partner, emotion: .happy)
-            case .shy:
-                world?.setPetEmotion(.partner, emotion: .shy)
-            case .sleepy, .resting:
-                world?.setPetEmotion(.partner, emotion: .content)
-            }
-            sharedSpaceWindow?.model.agentMessage = payloadString(event, "text")
-                ?? (remainsSleepy ? "来访宠物安心地睡着了" : "来访宠物回应了你的互动")
-
-        case "visit_returned":
-            guard let visit = makeVisit(from: event, status: .ended, profile: profile) else {
-                return
-            }
-            await socialVisitCoordinator?.apply(visit)
-            if visit.visitorPetID == profile.petID {
-                activeOutgoingVisit = nil
-                ensureLocalPetVisible()
-                if let agentCoordinator {
-                    let observation = AgentObservation(
-                        id: observationID(for: event),
-                        occurredAt: event.occurredAt,
-                        kind: .visitEnded(visitID: visit.id)
-                    )
-                    await agentCoordinator.applyVisit(visit)
-                    try await agentCoordinator.observeEvent(observation)
-                }
-            } else {
-                activeIncomingVisit = nil
-                world?.setVisiblePet(nil, for: .partner)
-            }
-            sharedSpaceWindow?.model.visitState = .away
-            sharedSpaceWindow?.model.activeVisitFriendshipID = nil
-
-        case "letter_received":
-            guard
-                payloadString(event, "recipientAccountID") == profile.accountID.rawValue,
-                payloadString(event, "letterID") != nil
-            else {
-                return
-            }
+        case "letter.delivered":
             sharedSpaceWindow?.model.agentMessage =
-                "\(profile.petName) 带回了一封只给你看的信，可在事件线中打开"
-            if let actorID = payloadString(event, "authorAccountID"),
-               let agentCoordinator {
-                let observation = AgentObservation(
-                    id: observationID(for: event),
-                    occurredAt: event.occurredAt,
-                    kind: .sealedHumanLetterAvailable(
-                        senderAccountID: AccountID(rawValue: actorID)
-                    )
-                )
-                try await agentCoordinator.observeEvent(observation)
+                "\(currentProfile.petName)带回了一封只给你看的信，可在事件线中打开"
+
+        case "pet.care.updated":
+            applyCareEvent(event)
+
+        case "pet.appearance.updated":
+            if let snapshot: PublicPetSnapshot = decodePayload(
+                event.payload["publicPetSnapshot"]
+            ), let characterID = PetCharacterID(appearance: snapshot.appearance) {
+                if snapshot.petID == currentProfile.petID {
+                    applyOwnPetCharacter(characterID)
+                    if let model = sharedSpaceWindow?.model {
+                        switch model.petCharacterSelectionState {
+                        case .saving(let selected), .pendingSync(let selected):
+                            model.petCharacterSelectionState =
+                            selected == characterID
+                            ? .confirmed(characterID)
+                            : .conflict(authoritative: characterID)
+                        default:
+                            break
+                        }
+                    }
+                } else {
+                    sharedSpaceWindow?.model.friendCharacterIDs[snapshot.petID] = characterID
+                    if activeIncomingVisit?.visitorPetID == snapshot.petID {
+                        world?.setCharacter(characterID, for: .partner)
+                    }
+                }
             }
+
+        case "agent.primary.changed":
+            return true
 
         default:
             break
         }
+        return false
     }
 
-    private func makeVisit(
-        from event: FriendshipEvent,
-        status: MVPVisitStatus,
-        profile: DevBootstrapProfile
-    ) -> MVPVisit? {
-        guard
-            let rawVisitID = payloadString(event, "visitID"),
-            let rawVisitorPetID = payloadString(event, "visitorPetID")
-        else { return nil }
-        let visitID = PetVisitID(rawValue: rawVisitID)
-        let previous = activeIncomingVisit?.id == visitID
-            ? activeIncomingVisit
-            : (activeOutgoingVisit?.id == visitID ? activeOutgoingVisit : nil)
-        let visitorPetID = PetProfileID(rawValue: rawVisitorPetID)
-        let ownerAccountID = payloadString(event, "visitorOwnerAccountID")
-            .map(AccountID.init(rawValue:))
-            ?? (visitorPetID == profile.petID
-                ? profile.accountID
-                : sharedSpaceWindow?.model.friends.first(where: { $0.petID == visitorPetID })?.accountID)
-        guard let ownerAccountID else { return nil }
-        let hostAccountID = payloadString(event, "hostAccountID")
-            .map(AccountID.init(rawValue:))
-            ?? previous?.hostAccountID
-            ?? (ownerAccountID == profile.accountID ? selectedFriendProfile?.accountID : profile.accountID)
-        guard let hostAccountID else { return nil }
-        let requestedBy = payloadString(event, "requestedByAccountID")
-            .map(AccountID.init(rawValue:))
-            ?? previous?.requestedByAccountID
-            ?? event.actorID.map(AccountID.init(rawValue:))
-            ?? hostAccountID
-        return MVPVisit(
-            id: visitID,
-            friendshipID: event.friendshipID,
-            visitorPetID: visitorPetID,
-            visitorOwnerAccountID: ownerAccountID,
-            hostAccountID: hostAccountID,
-            requestedByAccountID: requestedBy,
-            status: status,
-            reason: payloadString(event, "reason") ?? previous?.reason,
-            createdAt: previous?.createdAt ?? event.occurredAt,
-            startedAt: status == .active ? (previous?.startedAt ?? event.occurredAt) : previous?.startedAt,
-            endedAt: status == .ended || status == .cancelled ? event.occurredAt : nil
+    private func applyCareEvent(_ event: AccountEvent) {
+        guard let petID = event.payload["petID"]?.stringValue,
+              let publicCare: PublicPetCareSummary = decodePayload(event.payload["publicCare"])
+        else { return }
+        let careState: PetCareState? = decodePayload(event.payload["careState"])
+        let familiarity: PetFamiliarity? = decodePayload(event.payload["familiarity"])
+        if petID == currentProfile.petID.rawValue, let careState {
+            careStates[.mine] = careState
+            sharedSpaceWindow?.model.ownPetCare = careState
+        } else if activeIncomingVisit?.visitorPetID.rawValue == petID {
+            careStates[.partner] = PetCareState(
+                fullness: representativeValue(publicCare.fullness),
+                energy: representativeValue(publicCare.energy),
+                mood: representativeValue(publicCare.mood),
+                evaluatedAt: event.occurredAt
+            )
+        }
+        if let familiarity {
+            familiarities[familiarity.friendshipID] = familiarity
+            updateFriendCare(
+                friendshipID: familiarity.friendshipID,
+                publicCare: publicCare,
+                familiarity: familiarity
+            )
+        }
+        sharedSpaceWindow?.model.cloudSyncState = .synced
+    }
+
+    private func applyVisitProjection() async throws {
+        guard let projection = visitProjectionReducer?.projection else { return }
+        let previousIncomingVisit = activeIncomingVisit
+        let previousOutgoingVisit = activeOutgoingVisit
+        activeIncomingVisit = projection.activeIncomingVisit
+        activeOutgoingVisit = projection.activeOutgoingVisit
+        pendingVisits = projection.pendingVisits
+        refreshVisitInvitationQueue()
+
+        let liveActiveVisitIDs = Set(
+            [projection.activeIncomingVisit?.id, projection.activeOutgoingVisit?.id]
+                .compactMap { $0 }
+        )
+        optimisticallyReturningVisitIDs.formIntersection(liveActiveVisitIDs)
+
+        for visit in projection.pendingVisits.values {
+            await socialVisitCoordinator?.apply(visit)
+        }
+        if let visit = projection.activeIncomingVisit {
+            await socialVisitCoordinator?.apply(visit)
+            await agentCoordinator?.applyVisit(visit)
+        }
+        if let visit = projection.activeOutgoingVisit {
+            await socialVisitCoordinator?.apply(visit)
+            await agentCoordinator?.applyVisit(visit)
+        }
+
+        if let outgoing = projection.activeOutgoingVisit {
+            if optimisticallyReturningVisitIDs.contains(outgoing.id) {
+                ensureLocalPetVisible()
+            } else if previousOutgoingVisit?.id != outgoing.id, world?.pets[.mine] != nil {
+                animateOwnPetLeavingForVisit()
+            } else if previousOutgoingVisit?.id == outgoing.id,
+                      departingOwnPetVisitID != outgoing.id {
+                world?.setVisiblePet(nil, for: .mine)
+            }
+        } else if previousOutgoingVisit != nil {
+            animateOwnPetReturningHome()
+        } else {
+            ensureLocalPetVisible()
+        }
+
+        if let incoming = projection.activeIncomingVisit {
+            sharedSpaceWindow?.model.activeVisitFriendshipID = incoming.friendshipID
+            if optimisticallyReturningVisitIDs.contains(incoming.id) {
+                world?.setVisiblePet(nil, for: .partner)
+                sharedSpaceWindow?.model.visitState = .returning
+            } else {
+                announceVisitArrival()
+                sharedSpaceWindow?.model.visitState = .visiting
+            }
+        } else {
+            if previousIncomingVisit != nil,
+               announcedIncomingVisitID != nil,
+               world?.pets[.partner] != nil {
+                await animateVisitDeparture(for: .partner)
+            }
+            if activeIncomingVisit == nil {
+                world?.setVisiblePet(nil, for: .partner)
+                announcedIncomingVisitID = nil
+            }
+            if let outgoing = projection.activeOutgoingVisit {
+                sharedSpaceWindow?.model.activeVisitFriendshipID = outgoing.friendshipID
+                sharedSpaceWindow?.model.visitState =
+                    optimisticallyReturningVisitIDs.contains(outgoing.id)
+                    ? .returning
+                    : .ownPetVisiting
+            } else if let pending = projection.pendingVisits.values.sorted(by: {
+                $0.createdAt < $1.createdAt
+            }).first {
+                sharedSpaceWindow?.model.activeVisitFriendshipID = pending.friendshipID
+                sharedSpaceWindow?.model.visitState =
+                    pending.responderAccountID == projection.accountID
+                    ? .consideringInvitation
+                    : .invitationSent
+            } else {
+                sharedSpaceWindow?.model.activeVisitFriendshipID = nil
+                sharedSpaceWindow?.model.visitState = .away
+            }
+        }
+    }
+
+    private func handleUnresolvedVisitAction(_ action: VisitAction) async throws {
+        guard isPrimaryAgentDevice,
+              action.requiresResponse,
+              let agentCoordinator,
+              activeOutgoingVisit?.id == action.visitID
+        else { return }
+        let stimulus: PetInteractionStimulus = switch action.kind {
+        case .feed:
+            .feeding(foodName: action.payload["food"]?.stringValue)
+        case .message, .speech:
+            .message(text: action.payload["text"]?.stringValue ?? "主人和你说了句话")
+        case .play, .pet, .hug, .kiss, .flower, .walk, .reaction, .activity, .acknowledgement:
+            .play
+        }
+        try await agentCoordinator.observeEvent(
+            AgentObservation(
+                id: action.id,
+                occurredAt: action.createdAt,
+                kind: .visitInteraction(
+                    visitID: action.visitID,
+                    actorAccountID: action.senderAccountID,
+                    stimulus: stimulus
+                )
+            )
         )
     }
 
-    private func payloadString(_ event: FriendshipEvent, _ key: String) -> String? {
-        event.payload[key]?.stringValue
+    private func applyVisitActionReply(_ action: VisitAction) {
+        let reaction = action.payload["reaction"]?.stringValue.flatMap(PetReaction.init(rawValue:))
+        let remainsSleepy = reaction == .sleepy || reaction == .resting
+        world?.setWaitingForRemoteAgent(.partner, isWaiting: remainsSleepy)
+        switch reaction {
+        case .happy: world?.setPetEmotion(.partner, emotion: .happy)
+        case .excited: world?.setPetEmotion(.partner, emotion: .excited)
+        case .grateful: world?.setPetEmotion(.partner, emotion: .grateful)
+        case .playful: world?.setPetEmotion(.partner, emotion: .playful)
+        case .shy: world?.setPetEmotion(.partner, emotion: .shy)
+        case .sleepy, .resting: world?.setPetEmotion(.partner, emotion: .sleepy)
+        case nil: break
+        }
+        sharedSpaceWindow?.model.agentMessage = action.payload["text"]?.stringValue
+            ?? (remainsSleepy ? "来访宠物安心地睡着了" : "来访宠物回应了你的互动")
     }
 
-    private func observationID(for event: FriendshipEvent) -> UUID {
-        UUID(uuidString: event.id) ?? UUID()
+    private func handleConversationReceipt(
+        _ receipt: ConversationTurnReceipt,
+        event: AccountEvent
+    ) async throws {
+        guard let profile = developmentProfile,
+              receipt.message.senderAccountID != profile.accountID,
+              let agentCoordinator
+        else { return }
+        let message = receipt.message
+        let observation: AgentObservation
+        switch message.actorType {
+        case .human:
+            observation = AgentObservation(
+                id: UUID(uuidString: message.id.rawValue) ?? UUID(),
+                occurredAt: message.createdAt,
+                kind: .remoteHumanMessage(
+                    senderAccountID: message.senderAccountID,
+                    text: message.body
+                )
+            )
+        case .petAgent:
+            guard let friendPetID = sharedSpaceWindow?.model.friends.first(where: {
+                $0.accountID == message.senderAccountID
+            })?.petID else { return }
+            observation = AgentObservation(
+                id: UUID(uuidString: message.id.rawValue) ?? UUID(),
+                occurredAt: message.createdAt,
+                kind: .petMessage(senderPetID: friendPetID, text: message.body)
+            )
+        case .system:
+            return
+        }
+        await agentCoordinator.applyConversation(receipt.conversation)
+        await agentCoordinator.recordConversationMessage(
+            conversationID: receipt.conversation.id,
+            actorType: message.actorType,
+            actorID: message.senderAccountID.rawValue,
+            recipientPetID: profile.petID,
+            turnIndex: message.turnIndex,
+            text: message.body
+        )
+        if message.actorType == .petAgent, (message.turnIndex ?? -1) >= 5 {
+            try await agentCoordinator.finishConversation(
+                friendshipID: receipt.conversation.friendshipID,
+                conversationID: receipt.conversation.id,
+                occurredAt: event.occurredAt
+            )
+        } else {
+            try await agentCoordinator.observeEvent(observation)
+        }
+    }
+
+    private func decodePayload<Value: Decodable>(_ value: JSONValue?) -> Value? {
+        guard let value, let data = try? JSONEncoder().encode(value) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        return try? decoder.decode(Value.self, from: data)
     }
 
     private func visitStartedObservationID(_ visitID: PetVisitID) -> UUID {
@@ -1723,17 +2790,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func bootstrapLocalState() {
         let sessionStore = services.sessionStore
-        let interactionOutbox = services.interactionOutbox
+        let mutationOutbox = services.socialMutationOutbox
         let personalTimelineStore = services.personalTimelineStore
         localStateBootstrapTask = Task {
             do {
                 async let credential = sessionStore.load()
-                async let pendingCount = interactionOutbox.pendingCount()
+                async let pendingMutations = mutationOutbox.due(at: .distantFuture)
                 async let timeline = personalTimelineStore.load()
-                let state = try await (credential, pendingCount, timeline)
+                let state = try await (credential, pendingMutations, timeline)
                 self.sharedSpaceWindow?.model.timelineEvents = state.2
+                if state.0 != nil,
+                   let pendingCharacter = state.1.reversed().lazy.compactMap({
+                       self.petCharacterID(from: $0)
+                   }).first {
+                    self.applyOwnPetCharacter(pendingCharacter)
+                    self.sharedSpaceWindow?.model.petCharacterSelectionState =
+                        .pendingSync(pendingCharacter)
+                    self.sharedSpaceWindow?.model.cloudSyncState = .pending
+                }
+                if let friendshipID = self.sharedSpaceWindow?.model.selectedFriendshipID {
+                    self.loadFriendTimeline(friendshipID)
+                }
                 MinoLog.lifecycle.info(
-                    "Local state ready; signed in: \(state.0 != nil), pending interactions: \(state.1)"
+                    "Local state ready; signed in: \(state.0 != nil), pending social mutations: \(state.1.count)"
                 )
             } catch {
                 MinoLog.lifecycle.error(
@@ -1741,6 +2820,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
         }
+    }
+
+    private func petCharacterID(from mutation: SocialMutation) -> PetCharacterID? {
+        guard mutation.kind == .petAppearanceSelection,
+              case .object(let appearance)? = mutation.body["appearance"],
+              let rigID = appearance["rigID"]?.stringValue,
+              let body = appearance["body"]?.stringValue
+        else { return nil }
+        return PetCharacterID(appearance: ["rigID": rigID, "body": body])
     }
 }
 

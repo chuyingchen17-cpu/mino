@@ -72,7 +72,7 @@ public struct ClientRuntimeProfile: Codable, Equatable, Sendable {
     }
 }
 
-public struct BackendConfiguration: Equatable, Sendable {
+public struct BackendConfiguration: Codable, Equatable, Sendable {
     public let mode: BackendMode
     public let baseURL: URL?
     public let apiVersion: String
@@ -94,6 +94,13 @@ public struct BackendConfiguration: Equatable, Sendable {
         mode: .offline,
         baseURL: nil
     )
+
+    /// The built-in production service used by the standard Mino client,
+    /// including SwiftPM/Xcode runs that do not have an application Info.plist.
+    public static let minoCloud = BackendConfiguration(
+        mode: .remote,
+        baseURL: URL(string: "https://api.mino.pet")
+    )
 }
 
 public struct AppConfiguration: Equatable, Sendable {
@@ -109,6 +116,7 @@ public struct AppConfiguration: Equatable, Sendable {
     }
 
     public static let offline = AppConfiguration(backend: .offline)
+    public static let minoCloud = AppConfiguration(backend: .minoCloud)
 }
 
 public enum ConfigurationError: Error, Equatable, Sendable {
@@ -152,12 +160,13 @@ public enum AppConfigurationLoader {
             clientProfile = .standard
         }
 
+        let defaultMode: BackendMode = clientProfile == .standard ? .remote : .offline
         let modeValue = value(
             environmentKey: "MINO_BACKEND_MODE",
             infoKey: "MinoBackendMode",
             info: info,
             environment: environment
-        ) ?? BackendMode.offline.rawValue
+        ) ?? defaultMode.rawValue
 
         guard let mode = BackendMode(rawValue: modeValue.lowercased()) else {
             throw ConfigurationError.unknownBackendMode(modeValue)
@@ -195,12 +204,17 @@ public enum AppConfigurationLoader {
             )
         }
 
+        let builtInBaseURL = clientProfile == .standard
+            ? BackendConfiguration.minoCloud.baseURL?.absoluteString
+            : nil
         guard let baseURLValue = value(
             environmentKey: "MINO_API_BASE_URL",
             infoKey: "MinoAPIBaseURL",
             info: info,
             environment: environment
-        ), let baseURL = URL(string: baseURLValue), baseURL.host != nil else {
+        ) ?? builtInBaseURL,
+              let baseURL = URL(string: baseURLValue),
+              baseURL.host != nil else {
             throw ConfigurationError.missingBackendBaseURL
         }
         guard baseURL.query == nil, baseURL.fragment == nil else {
@@ -237,6 +251,27 @@ public enum AppConfigurationLoader {
             return number.stringValue
         }
         return nil
+    }
+
+    public static func validate(_ configuration: BackendConfiguration) throws {
+        guard isValidAPIVersion(configuration.apiVersion) else {
+            throw ConfigurationError.invalidAPIVersion(configuration.apiVersion)
+        }
+        guard (1...60).contains(configuration.requestTimeout) else {
+            throw ConfigurationError.invalidRequestTimeout(
+                String(configuration.requestTimeout)
+            )
+        }
+        guard configuration.mode == .remote else { return }
+        guard let baseURL = configuration.baseURL, baseURL.host != nil else {
+            throw ConfigurationError.missingBackendBaseURL
+        }
+        guard baseURL.query == nil, baseURL.fragment == nil else {
+            throw ConfigurationError.invalidBackendBaseURL(baseURL.absoluteString)
+        }
+        guard isSecureOrLocal(baseURL), baseURL.user == nil, baseURL.password == nil else {
+            throw ConfigurationError.insecureBackendBaseURL(baseURL.absoluteString)
+        }
     }
 
     private static func isValidAPIVersion(_ value: String) -> Bool {

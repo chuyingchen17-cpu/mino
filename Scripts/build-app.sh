@@ -6,17 +6,26 @@ project_dir="${0:A:h:h}"
 build_dir="$project_dir/.build"
 bundle_dir="$build_dir/Mino.app"
 staging_dir="$build_dir/Mino.app.staging"
-cache_dir="$project_dir/.cache"
+cache_dir="${MINO_CACHE_DIR:-$project_dir/.cache}"
 configuration="${MINO_BUILD_CONFIGURATION:-debug}"
 marketing_version="${MINO_MARKETING_VERSION:-0.1.0}"
 build_number="${MINO_BUILD_NUMBER:-1}"
-backend_mode="${MINO_BACKEND_MODE:-offline}"
-api_base_url="${MINO_API_BASE_URL:-}"
+backend_mode="${MINO_BACKEND_MODE:-remote}"
+api_base_url="${MINO_API_BASE_URL:-https://api.mino.pet}"
 api_version="${MINO_API_VERSION:-v1}"
 request_timeout="${MINO_REQUEST_TIMEOUT:-10}"
+app_iconset_dir="$build_dir/Mino.iconset"
 
 if [[ "$configuration" != "debug" && "$configuration" != "release" ]]; then
     echo "MINO_BUILD_CONFIGURATION must be 'debug' or 'release'" >&2
+    exit 2
+fi
+
+if [[ "$configuration" == "release" \
+    && -z "${MINO_CODE_SIGN_IDENTITY:-}" \
+    && "${MINO_ALLOW_ADHOC_RELEASE:-0}" != "1" ]]; then
+    echo "Release bundles require MINO_CODE_SIGN_IDENTITY for a stable Keychain identity." >&2
+    echo "CI-only validation may set MINO_ALLOW_ADHOC_RELEASE=1; do not distribute that artifact." >&2
     exit 2
 fi
 
@@ -63,15 +72,28 @@ env CLANG_MODULE_CACHE_PATH="$cache_dir/clang" swift build \
 rm -rf "$staging_dir"
 mkdir -p "$staging_dir/Contents/MacOS" "$staging_dir/Contents/Resources"
 install -m 755 "$build_dir/$configuration/Mino" "$staging_dir/Contents/MacOS/Mino"
-install -m 644 \
-    "$project_dir/Sources/MinoPresentation/Resources/shared-room.png" \
-    "$staging_dir/Contents/Resources/shared-room.png"
-install -m 644 \
-    "$project_dir/Sources/MinoPresentation/Resources/shared-room-away.png" \
-    "$staging_dir/Contents/Resources/shared-room-away.png"
-install -m 644 \
-    "$project_dir/Sources/MinoPresentation/Resources/partner-avatar.png" \
-    "$staging_dir/Contents/Resources/partner-avatar.png"
+presentation_resource_bundle="$build_dir/$configuration/Mino_MinoPresentation.bundle"
+if [[ ! -d "$presentation_resource_bundle" ]]; then
+    echo "Missing MinoPresentation frame resource bundle: $presentation_resource_bundle" >&2
+    exit 2
+fi
+# Copy only the current frame tree so stale resources from an incremental
+# pre-frame build can never resurrect retired sprites. The product catalog
+# explicitly prefers Contents/Resources/PetFrames; placing a SwiftPM bundle at
+# the .app root creates an unsealed macOS bundle and fails strict code signing.
+if [[ ! -d "$presentation_resource_bundle/PetFrames" ]]; then
+    echo "Missing packaged PetFrames directory" >&2
+    exit 2
+fi
+cp -R "$presentation_resource_bundle/PetFrames" \
+    "$staging_dir/Contents/Resources/PetFrames"
+rm -rf "$app_iconset_dir"
+mkdir -p "$app_iconset_dir"
+/usr/bin/xcrun swift "$project_dir/Scripts/generate-app-icon.swift" "$app_iconset_dir"
+/usr/bin/iconutil --convert icns \
+    --output "$staging_dir/Contents/Resources/Mino.icns" \
+    "$app_iconset_dir"
+rm -rf "$app_iconset_dir"
 cp "$project_dir/Support/Info.plist" "$staging_dir/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$marketing_version" "$staging_dir/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$build_number" "$staging_dir/Contents/Info.plist"
@@ -88,6 +110,10 @@ if [[ -n "${MINO_CODE_SIGN_IDENTITY:-}" ]]; then
         --sign "$MINO_CODE_SIGN_IDENTITY" \
         "$staging_dir"
 else
+    if [[ "$configuration" == "debug" ]]; then
+        echo "Warning: ad-hoc Debug uses a build-scoped encrypted session store." >&2
+        echo "Set MINO_CODE_SIGN_IDENTITY to preserve the login session across rebuilds." >&2
+    fi
     # SwiftPM only linker-signs the executable. Sign the assembled bundle so
     # macOS binds Info.plist and resources to the application identity too.
     codesign --force --sign - "$staging_dir"

@@ -1,27 +1,33 @@
 # Mino
 
-Mino 是一个原生 macOS 个人桌宠社交 MVP。每个账号拥有自己的宠物和本地 Agent；成为好友后，宠物才能自主对话、串门和携带文字信。服务端负责好友授权、模型代理、会话/串门协调、加密信件和持久事件转发，不保存桌面坐标，也不会在客户端离线时替宠物作决定。
+Mino 是原生 macOS 个人桌宠社交 MVP。每个账号拥有一只可养成的桌宠；好友关系授权后，主人可以双向邀请串门、离线照顾来访宠物，并托付密封文字信。摸摸、投喂、陪玩、散步等标准互动完全由本地确定性引擎即时回应，不调用模型；服务端只负责身份、授权、养成事实、Visit、信件和事件同步。
 
-## 单 Mac 双客户端体验
+## 本地运行
 
-要求：macOS 14+、Swift 6.2+、Node.js 20+，以及已启动的 Docker/OrbStack。
+要求：macOS 14+、Swift 6.2+、Node.js 20+。后端直接运行在本地 Cloudflare Workers Runtime，不需要 Docker 或 PostgreSQL。
 
 ```sh
-Scripts/dev-dual-clients.sh
+cp Backend/.env.example Backend/.dev.vars
+npm --prefix Backend ci
+npm --prefix Backend run db:migrate:local
+npm --prefix Backend run dev -- --ip 127.0.0.1 --port 8787
 ```
 
-脚本会启动仓库内的 PostgreSQL 与 TypeScript 后端，执行迁移，并生成两个带独立 Bundle ID 和远端配置的 Debug 应用包：
-
-- `.build/dual-clients/Mino-alice.app`：Alice / 奶糖，独立 Application Support、Keychain 与左半屏活动区域。
-- `.build/dual-clients/Mino-bob.app`：Bob / 团子，独立 Application Support、Keychain 与右半屏活动区域。
-
-开发身份会自动 bootstrap，Alice 与 Bob 预置为好友。宠物可自主联系、完成最多六轮对话、生成事件摘要、提出/接受串门；接待主人可以投喂、玩耍、发送真人消息和托付文字信。按 `Control-C` 会结束脚本启动的客户端和后端进程。
-
-若只体验本地离线界面：
+另一个终端可启动 Alice / Bob 两个隔离的 Debug 客户端：
 
 ```sh
-Scripts/build-app.sh
-open .build/Mino.app
+MINO_API_BASE_URL=http://127.0.0.1:8787 Scripts/dev-dual-clients.sh
+```
+
+脚本会在后端未运行时自动迁移本地 D1 并启动 Wrangler，然后生成：
+
+- `.build/dual-clients/Mino-alice.app`
+- `.build/dual-clients/Mino-bob.app`
+
+若只想验证双账号完整协议，不打开 GUI：
+
+```sh
+Scripts/smoke-dual-client-api.sh
 ```
 
 ## 验证
@@ -30,26 +36,63 @@ open .build/Mino.app
 Scripts/test.sh
 ```
 
-该命令运行全部 Swift 测试、后端 TypeScript 检查和后端测试。CI 还会启动 PostgreSQL、执行迁移和真实数据库集成测试。
+该命令运行 Swift 测试、Worker TypeScript 检查、Workers Runtime 中的 D1 / Durable Object 测试、OpenAPI 生成和 Wrangler dry-run。单独构建应用：
 
-## 工程结构
-
-```text
-Sources/
-  MinoDomain/          领域模型、事件与服务协议
-  MinoAgent/           本地宠物 Agent、策略护栏、上下文和加密记忆
-  MinoRuntime/         宠物移动、互动与逻辑可见状态
-  MinoPresentation/    AppKit / SpriteKit / SwiftUI 界面
-  MinoInfrastructure/  REST、WebSocket、配置和日志
-  MinoSecurity/        会话与记忆密钥的 Keychain 实现
-  MinoPersistence/     事件游标、时间线、快照与离线 Outbox
-  MinoApp/             协调器和应用组合根
-Backend/               Fastify + Kysely + PostgreSQL 单进程服务
-Scripts/               构建、测试和双客户端启动脚本
+```sh
+Scripts/build-app.sh
 ```
 
-共同协议由 [`Backend/openapi.yaml`](Backend/openapi.yaml) 定义。架构边界见 [`Docs/Architecture.md`](Docs/Architecture.md)，接口说明见 [`Docs/BackendContract.md`](Docs/BackendContract.md)。
+正式或 QA release 包必须使用稳定的 Developer ID 签名，以使用 Keychain
+并让登录状态安全地跨版本升级：
+
+```sh
+MINO_BUILD_CONFIGURATION=release \
+MINO_CODE_SIGN_IDENTITY="Developer ID Application: …" \
+Scripts/build-app.sh
+```
+
+`MINO_ALLOW_ADHOC_RELEASE=1` 只供 CI 校验未分发的 bundle 结构使用。
+
+本机 Debug 包优先使用稳定的 Apple Development 身份：
+
+```sh
+MINO_CODE_SIGN_IDENTITY="Apple Development: …" Scripts/build-app.sh
+```
+
+如果 `codesign` 返回 `errSecInternalComponent`，需要先由本人解锁“登录”钥匙串或在
+Xcode 中允许该私钥用于签名；不要把锁屏密码写进脚本或环境变量。未能稳定签名时，
+构建脚本会生成 ad-hoc 包；该包使用按当前二进制隔离的 AES-GCM 本地会话存储，
+不会访问旧构建的 Keychain。相同 app 重开可复用登录，重新编译后需登录一次。
+
+标准客户端（包括 Xcode / SwiftPM 直接运行）内置生产服务 `https://api.mino.pet`，用户界面不提供服务器地址、API 版本或超时设置。`MINO_API_BASE_URL` 等环境变量只用于本地双客户端和开发 smoke，不会成为产品设置。
+
+## 架构
+
+```text
+macOS 客户端 ── HTTPS/WSS ── Cloudflare Worker (Hono)
+     │                              ├── D1：业务状态、账号事件、幂等回执
+     │                              ├── AccountRealtimeHub Durable Object
+     └── 本地回应/动画/持久 Outbox         └── 可选模型代理（不在标准互动路径）
+```
+
+Worker 写入业务状态、每个收件人的 Account Event 和幂等回执后，按 `AccountID` 通知唯一 Durable Object。WebSocket 只发送 `ready` / `events_available` 提示；客户端始终通过 `GET /v1/events?after=` 恢复事实，并用 `GET /v1/sync/bootstrap` 对账完整状态。
+
+主要目录：
+
+```text
+Sources/MinoDomain/          领域模型、Visit 投影、命令和服务协议
+Sources/MinoAgent/           本地 Agent、策略护栏和加密记忆
+Sources/MinoRuntime/         本地宠物移动、动画与可见状态
+Sources/MinoPresentation/    AppKit / SpriteKit / SwiftUI
+Sources/MinoInfrastructure/  Worker REST、账号 WebSocket 与配置
+Sources/MinoPersistence/     账号事件游标、个人时间线、社交 Outbox
+Sources/MinoSecurity/        Keychain／加密会话与记忆密钥
+Sources/MinoApp/             同步、Visit、对话和 Agent 协调器
+Backend/                     Cloudflare Worker、D1 migrations、Durable Object
+```
+
+机器可读协议为 [`Backend/openapi.yaml`](Backend/openapi.yaml)。详细设计见 [`Docs/Architecture.md`](Docs/Architecture.md)、[`Docs/VisitProtocol.md`](Docs/VisitProtocol.md) 与 [`Docs/EventSynchronization.md`](Docs/EventSynchronization.md)；视觉规范见 [`Docs/DesignTokens.md`](Docs/DesignTokens.md)，部署见 [`Docs/CloudflareDeployment.md`](Docs/CloudflareDeployment.md)。
 
 ## MVP 边界
 
-当前不包含正式注册登录、账号搜索与推荐、拉黑举报、多 Agent 设备选主、图片明信片、复杂库存、完整端到端加密、发行签名和自动更新。文字信使用 HTTPS/WSS 传输并由服务端 AES-256-GCM 加密存储；不宣称端到端加密。
+正式账号发现、拉黑举报、推送唤醒、图片明信片、复杂库存、Pro 套餐/额度账本、完整端到端加密、发行签名与自动更新仍不在本轮范围。文字信通过 HTTPS/WSS 传输并在 D1 中使用 AES-GCM 密文保存；这不是 E2EE。未来 Pro 智能回应只能在基础反馈之后由发起者主动触发，不能改变养成数值、Visit 权限或读取信件正文。

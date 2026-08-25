@@ -43,6 +43,9 @@ public struct FriendProfile: Codable, Equatable, Identifiable, Sendable {
     public let petID: PetProfileID
     public let petName: String
     public let friendsSince: Date
+    public let publicCare: PublicPetCareSummary?
+    public let familiarity: PetFamiliarity?
+    public let characterID: PetCharacterID?
 
     public var id: FriendshipID { friendshipID }
 
@@ -52,7 +55,10 @@ public struct FriendProfile: Codable, Equatable, Identifiable, Sendable {
         accountName: String,
         petID: PetProfileID,
         petName: String,
-        friendsSince: Date
+        friendsSince: Date,
+        publicCare: PublicPetCareSummary? = nil,
+        familiarity: PetFamiliarity? = nil,
+        characterID: PetCharacterID? = nil
     ) {
         self.friendshipID = friendshipID
         self.accountID = accountID
@@ -60,6 +66,9 @@ public struct FriendProfile: Codable, Equatable, Identifiable, Sendable {
         self.petID = petID
         self.petName = petName
         self.friendsSince = friendsSince
+        self.publicCare = publicCare
+        self.familiarity = familiarity
+        self.characterID = characterID
     }
 }
 
@@ -108,7 +117,7 @@ public struct FriendRequest: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-public struct CreateFriendRequestCommand: Codable, Equatable, Sendable {
+public struct CreateFriendRequestCommand: Encodable, Equatable, Sendable {
     public let addresseeAccountID: AccountID
     public let idempotencyKey: UUID
 
@@ -116,6 +125,8 @@ public struct CreateFriendRequestCommand: Codable, Equatable, Sendable {
         self.addresseeAccountID = addresseeAccountID
         self.idempotencyKey = idempotencyKey
     }
+
+    private enum CodingKeys: String, CodingKey { case addresseeAccountID }
 }
 
 public enum FriendRequestDecision: String, Codable, CaseIterable, Sendable {
@@ -123,7 +134,7 @@ public enum FriendRequestDecision: String, Codable, CaseIterable, Sendable {
     case decline = "reject"
 }
 
-public struct RespondFriendRequestCommand: Codable, Equatable, Sendable {
+public struct RespondFriendRequestCommand: Encodable, Equatable, Sendable {
     public let response: FriendRequestDecision
     public let idempotencyKey: UUID
 
@@ -131,4 +142,7 @@ public struct RespondFriendRequestCommand: Codable, Equatable, Sendable {
         self.response = response
         self.idempotencyKey = idempotencyKey
     }
+
+
+    private enum CodingKeys: String, CodingKey { case response }
 }

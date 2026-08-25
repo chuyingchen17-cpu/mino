@@ -7,8 +7,7 @@ project_dir="${0:A:h:h}"
 api_base_url="${MINO_API_BASE_URL:-http://127.0.0.1:8080}"
 api_version="${MINO_API_VERSION:-v1}"
 configuration="${MINO_BUILD_CONFIGURATION:-debug}"
-database_url="${MINO_DEV_DATABASE_URL:-postgres://mino:mino_dev_only@127.0.0.1:5432/mino}"
-cache_dir="$project_dir/.cache"
+cache_dir="${MINO_CACHE_DIR:-$project_dir/.cache}"
 
 for command_name in curl swift npm node ditto plutil codesign; do
     if (( ! $+commands[$command_name] )); then
@@ -27,11 +26,6 @@ if [[ ! "$api_base_url" =~ '^http://(127\.0\.0\.1|localhost):[0-9]+$' ]]; then
     echo "Dual-client MVP requires a loopback HTTP API URL with an explicit port." >&2
     exit 2
 fi
-if [[ ! "$database_url" =~ '^postgres(ql)?://[^@/]+@(127\.0\.0\.1|localhost):[0-9]+/[^/?#]+$' ]]; then
-    echo "MINO_DEV_DATABASE_URL must point to a loopback development database." >&2
-    exit 2
-fi
-
 backend_port="${api_base_url##*:}"
 backend_pid=""
 alice_pid=""
@@ -56,42 +50,21 @@ start_backend_if_needed() {
         return
     fi
 
-    if (( ! $+commands[docker] )); then
-        echo "Backend is offline and Docker is unavailable." >&2
-        echo "Install/start Docker, or start Backend manually at $api_base_url." >&2
-        exit 1
-    fi
-
-    docker compose --file "$project_dir/Backend/compose.yaml" up --detach postgres
-
     if [[ ! -d "$project_dir/Backend/node_modules" ]]; then
         npm --prefix "$project_dir/Backend" ci
     fi
 
-    local migration_ready=false
-    for _ in {1..30}; do
-        if env \
-            NODE_ENV=development \
-            DATABASE_URL="$database_url" \
-            npm --prefix "$project_dir/Backend" run db:migrate >/dev/null 2>&1; then
-            migration_ready=true
-            break
-        fi
-        sleep 1
-    done
-    if [[ "$migration_ready" != true ]]; then
-        echo "PostgreSQL did not become ready for migrations." >&2
-        exit 1
-    fi
-
-    npm --prefix "$project_dir/Backend" run build
-    env \
-        NODE_ENV=development \
-        HOST=127.0.0.1 \
-        PORT="$backend_port" \
-        DATABASE_URL="$database_url" \
-        DEV_BOOTSTRAP_ENABLED=true \
-        node "$project_dir/Backend/dist/src/server.js" &
+    npm --prefix "$project_dir/Backend" run db:migrate:local
+    (
+        cd "$project_dir/Backend"
+        npm run dev -- \
+            --ip 127.0.0.1 \
+            --port "$backend_port" \
+            --var GITHUB_CLIENT_ID:Ov23liZNdBaSHLQpJkIn \
+            --var SESSION_TOKEN_PEPPER:mino-local-session-pepper \
+            --var LETTER_ENCRYPTION_KEY_V1:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY= \
+            --var MODEL_PROVIDER_API_KEY:local-mock
+    ) &
     backend_pid=$!
 
     local backend_ready=false

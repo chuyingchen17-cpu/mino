@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "canvas": {
+    "width": 120,
+    "height": 120
+  },
+  "groundAnchor": {
+    "x": 60,
+    "y": 102
+  },
+  "clips": [
+    { "id": "idle", "framesPerSecond": 4, "loops": true, "reduceMotionFrameIndex": 0, "minimumFrames": 2 },
+    { "id": "walk", "framesPerSecond": 8, "loops": true, "reduceMotionFrameIndex": 0, "minimumFrames": 4 },
+    { "id": "pet_receive", "framesPerSecond": 8, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "eat", "framesPerSecond": 7, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "play", "framesPerSecond": 8, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "sleep", "framesPerSecond": 3, "loops": true, "reduceMotionFrameIndex": 0, "minimumFrames": 2 },
+    { "id": "shy", "framesPerSecond": 6, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "happy", "framesPerSecond": 8, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "tired_refuse", "framesPerSecond": 6, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "full_refuse", "framesPerSecond": 6, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "cuddle_give", "framesPerSecond": 8, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "cuddle_receive", "framesPerSecond": 8, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "flower_give", "framesPerSecond": 8, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "flower_receive", "framesPerSecond": 8, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "letter_give", "framesPerSecond": 8, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "wave", "framesPerSecond": 8, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 },
+    { "id": "welcome", "framesPerSecond": 8, "loops": false, "reduceMotionFrameIndex": 2, "minimumFrames": 4 }
+  ]
+}

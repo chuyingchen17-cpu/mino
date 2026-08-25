@@ -8,59 +8,19 @@ public enum PetInteractionKind: String, Codable, CaseIterable, Sendable {
 
 public struct PetProfileID: RawRepresentable, Codable, Hashable, Sendable {
     public let rawValue: String
-
-    public init(rawValue: String) {
-        self.rawValue = rawValue
-    }
-
+    public init(rawValue: String) { self.rawValue = rawValue }
     public init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        rawValue = try container.decode(String.self)
+        rawValue = try decoder.singleValueContainer().decode(String.self)
     }
-
     public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         try container.encode(rawValue)
     }
 }
 
-public struct InteractionCommand: Codable, Equatable, Sendable {
-    public let idempotencyKey: UUID
-    public let kind: PetInteractionKind
-    public let senderPetID: PetProfileID
-    public let recipientPetID: PetProfileID
-    public let clientCreatedAt: Date
-
-    public init(
-        idempotencyKey: UUID = UUID(),
-        kind: PetInteractionKind,
-        senderPetID: PetProfileID,
-        recipientPetID: PetProfileID,
-        clientCreatedAt: Date = Date()
-    ) {
-        self.idempotencyKey = idempotencyKey
-        self.kind = kind
-        self.senderPetID = senderPetID
-        self.recipientPetID = recipientPetID
-        self.clientCreatedAt = clientCreatedAt
-    }
-}
-
-public struct InteractionReceipt: Codable, Equatable, Sendable {
-    public let interactionID: String
-    public let acceptedAt: Date
-
-    public init(interactionID: String, acceptedAt: Date) {
-        self.interactionID = interactionID
-        self.acceptedAt = acceptedAt
-    }
-}
-
 public struct BackendHealth: Codable, Equatable, Sendable {
     public enum Status: String, Codable, Sendable {
-        case healthy
-        case degraded
-        case offline
+        case healthy, degraded, offline
     }
 
     public let status: Status
@@ -76,126 +36,82 @@ public enum BackendServiceError: Error, Equatable, Sendable {
     case offline
 }
 
-public protocol BackendService: Sendable {
+/// Minimal durable source used by the account synchronization loop.
+public protocol AccountEventSource: Sendable {
+    func fetchSyncBootstrap() async throws -> SyncBootstrap
+    func fetchAccountEvents(
+        after cursor: Int64,
+        limit: Int,
+        timelineVisible: Bool?
+    ) async throws -> AccountEventPage
+}
+
+/// The single account-scoped network boundary used by the macOS app.
+public protocol AccountBackendService: AccountEventSource {
     func checkHealth() async throws -> BackendHealth
-    func sendInteraction(_ command: InteractionCommand) async throws -> InteractionReceipt
-    func fetchPetPresence() async throws -> PetPresenceSnapshot
-    func startPetVisit(_ command: StartPetVisitCommand) async throws -> PetVisitReceipt
-    func returnPetVisit(_ command: ReturnPetVisitCommand) async throws -> PetVisitReceipt
-    func sendPetVisitInvitation(
-        _ command: SendPetVisitInvitationCommand
-    ) async throws -> PetVisitInvitation
-    func fetchPendingPetVisitInvitations() async throws -> [PetVisitInvitation]
-    func respondToPetVisitInvitation(
-        _ command: RespondToPetVisitInvitationCommand
-    ) async throws -> PetVisitInvitationReceipt
-    func fetchPersonalTimeline(after cursor: String?) async throws -> PersonalTimelinePage
-}
-
-public extension BackendService {
-    @available(*, deprecated, renamed: "fetchPersonalTimeline(after:)")
-    func fetchCoupleTimeline(after cursor: String?) async throws -> PersonalTimelinePage {
-        try await fetchPersonalTimeline(after: cursor)
-    }
-}
-
-@available(*, deprecated, renamed: "PetInteractionKind")
-public typealias CoupleInteractionKind = PetInteractionKind
-
-/// Network capabilities used by the two-client social MVP.
-///
-/// Kept separate from `BackendService` so the existing offline demo and its
-/// lightweight test doubles remain source-compatible while the MVP rolls out.
-public protocol MVPBackendService: BackendService {
+    func startGitHubDeviceAuthorization() async throws -> GitHubDeviceAuthorization
+    func completeGitHubDeviceAuthorization(
+        deviceCode: String,
+        device: DeviceMetadata
+    ) async throws -> GitHubDeviceCompletion
+    func refreshSession(_ refreshToken: String) async throws -> AccountSession
+    func logout() async throws
     func bootstrapDevelopmentProfile(_ profile: String) async throws -> DevBootstrapProfile
+    func fetchCurrentProfile() async throws -> CurrentProfile
+    func updateCurrentProfile(accountName: String, petName: String) async throws -> CurrentProfile
+    func updateOwnPetAppearance(
+        _ command: PetAppearanceSelectionCommand
+    ) async throws -> PublicPetSnapshot
+    func fetchOwnPetCare() async throws -> PetCareState
+    func interactWithPet(
+        petID: PetProfileID,
+        command: PetInteractionCommand
+    ) async throws -> PetInteractionReceipt
 
     func fetchFriends() async throws -> [FriendProfile]
     func fetchFriendRequests(status: FriendRequestStatus?) async throws -> [FriendRequest]
     func createFriendRequest(_ command: CreateFriendRequestCommand) async throws -> FriendRequest
     func respondToFriendRequest(
-        requestID: FriendRequestID,
+        friendshipID: FriendshipID,
         command: RespondFriendRequestCommand
     ) async throws -> FriendRequest
+    func closeFriendship(_ friendshipID: FriendshipID, idempotencyKey: UUID) async throws
 
-    func fetchEvents(
-        friendshipID: FriendshipID,
-        after eventID: String?
-    ) async throws -> FriendshipEventPage
-    func fetchTimelineEvents(
-        friendshipID: FriendshipID,
-        after eventID: String?
-    ) async throws -> FriendshipEventPage
+    func fetchVisits(status: VisitStatus?) async throws -> [Visit]
+    func createVisit(_ command: CreateVisitCommand) async throws -> Visit
+    func respondToVisit(
+        visitID: PetVisitID,
+        command: RespondToVisitCommand
+    ) async throws -> Visit
+    func endVisit(visitID: PetVisitID, command: EndVisitCommand) async throws -> Visit
+    func createVisitAction(
+        visitID: PetVisitID,
+        command: CreateVisitActionCommand
+    ) async throws -> VisitAction
 
-    func createConversation(
-        friendshipID: FriendshipID,
-        _ command: CreateConversationCommand
-    ) async throws -> ConversationTurnReceipt
-    func fetchConversations(
-        friendshipID: FriendshipID,
-        status: ConversationStatus?
-    ) async throws -> [PetConversation]
+    func createConversation(_ command: CreateConversationCommand) async throws -> ConversationTurnReceipt
+    func fetchConversations() async throws -> [PetConversation]
     func fetchConversationMessages(
-        friendshipID: FriendshipID,
         conversationID: ConversationID
     ) async throws -> [PetConversationMessage]
     func sendConversationMessage(
-        friendshipID: FriendshipID,
         conversationID: ConversationID,
         command: SendConversationMessageCommand
     ) async throws -> ConversationTurnReceipt
     func endConversation(
-        friendshipID: FriendshipID,
         conversationID: ConversationID,
         command: EndConversationCommand
     ) async throws -> PetConversation
 
-    func createVisitInvitation(
-        friendshipID: FriendshipID,
-        _ command: CreateVisitInvitationCommand
-    ) async throws -> MVPVisit
-    func fetchVisitInvitations(
-        friendshipID: FriendshipID,
-        status: MVPVisitStatus?
-    ) async throws -> [MVPVisit]
-    func respondToVisitInvitation(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: RespondToVisitInvitationCommand
-    ) async throws -> MVPVisit
-    func sendVisitInteraction(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: CreateVisitInteractionCommand
-    ) async throws -> VisitInteractionReceipt
-    func sendVisitReaction(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: CreateVisitReactionCommand
-    ) async throws -> VisitReactionReceipt
     func createLetter(
-        friendshipID: FriendshipID,
         visitID: PetVisitID,
         command: CreateLetterCommand
     ) async throws -> PetLetter
-    func fetchLetter(
-        friendshipID: FriendshipID,
-        _ letterID: LetterID
-    ) async throws -> PetLetter
-    func endVisit(
-        friendshipID: FriendshipID,
-        visitID: PetVisitID,
-        command: EndVisitCommand
-    ) async throws -> EndVisitReceipt
+    func fetchLetter(_ letterID: LetterID) async throws -> PetLetter
+    func claimPrimaryAgentDevice(_ deviceID: DeviceID, idempotencyKey: UUID) async throws
 }
 
-/// Realtime delivery is deliberately independent from REST lifecycle. Consumers
-/// always retain `/events?after=` as the recovery source of truth.
-public protocol FriendshipEventRealtimeService: Sendable {
-    func events(
-        friendshipID: FriendshipID,
-        after eventID: String?
-    ) async throws -> AsyncThrowingStream<FriendshipEvent, Error>
+/// WebSocket carries only account-level hints. Durable events always come from REST.
+public protocol AccountEventSignalService: Sendable {
+    func signals() async throws -> AsyncThrowingStream<AccountRealtimeSignal, Error>
 }
-
-@available(*, deprecated, renamed: "FriendshipEventRealtimeService")
-public typealias CoupleEventRealtimeService = FriendshipEventRealtimeService

@@ -185,14 +185,80 @@ func visitingPetNapsUntilItsRemoteAgentResponds() {
 
     world.setWaitingForRemoteAgent(.partner, isWaiting: true)
     world.walkAll()
-    #expect(world.pets[.partner]?.activity == .idle)
+    #expect(world.pets[.partner]?.activity == .sleeping)
+    #expect(world.pets[.partner]?.emotion == .sleepy)
 
     world.setPetHovering(.partner, isHovering: true)
     world.setPetHovering(.partner, isHovering: false)
-    #expect(world.pets[.partner]?.activity == .idle)
+    #expect(world.pets[.partner]?.activity == .sleeping)
 
     world.setWaitingForRemoteAgent(.partner, isWaiting: false)
     #expect(world.pets[.partner]?.activity == .walking)
+}
+
+@MainActor
+@Test
+func localActivityReturnsToIdleAfterItFinishes() async throws {
+    let mine = PetRuntimeState(
+        id: .mine,
+        displayName: "奶糖",
+        position: CGPoint(x: 100, y: 100),
+        facing: .right,
+        activity: .idle,
+        emotion: .content,
+        avatar: .mine
+    )
+    let world = PetWorld(pets: [mine]) { _ in
+        CGRect(x: 0, y: 0, width: 800, height: 600)
+    }
+    defer { world.stop() }
+
+    world.performLocalActivity(.mine, activity: .petting, emotion: .happy, duration: 0.05)
+    #expect(world.pets[.mine]?.activity == .petting)
+
+    try await Task.sleep(for: .milliseconds(320))
+    #expect(world.pets[.mine]?.activity == .idle)
+    #expect(world.pets[.mine]?.emotion == .content)
+}
+
+@MainActor
+@Test
+func repeatedLocalActivityGetsANewPlaybackEvenForTheSameClip() {
+    let mine = PetRuntimeState(
+        id: .mine,
+        displayName: "奶糖",
+        position: CGPoint(x: 100, y: 100),
+        facing: .right,
+        activity: .idle,
+        emotion: .content,
+        avatar: .mine
+    )
+    let world = PetWorld(pets: [mine]) { _ in
+        CGRect(x: 0, y: 0, width: 800, height: 600)
+    }
+    defer { world.stop() }
+
+    world.performLocalActivity(
+        .mine,
+        activity: .petting,
+        emotion: .happy,
+        duration: 2.4,
+        motionClip: .petReceive
+    )
+    let firstPlaybackID = world.pets[.mine]?.motionPlaybackID
+
+    world.performLocalActivity(
+        .mine,
+        activity: .petting,
+        emotion: .happy,
+        duration: 2.4,
+        motionClip: .petReceive
+    )
+
+    #expect(firstPlaybackID != nil)
+    #expect(world.pets[.mine]?.motionPlaybackID != firstPlaybackID)
+    #expect(world.pets[.mine]?.motionClipOverride == .petReceive)
+    #expect(world.pets[.mine]?.motionDurationOverride == 2.4)
 }
 
 @MainActor
@@ -223,7 +289,7 @@ func explicitInteractionKeepsRunningWhilePetIsHovered() async throws {
 
     world.setPetHovering(.mine, isHovering: true)
     world.triggerKiss()
-    try await Task.sleep(for: .milliseconds(120))
+    try await Task.sleep(for: .milliseconds(320))
 
     #expect(world.pets[.mine]?.position != mine.position)
     #expect(world.pets[.partner]?.position != partner.position)
@@ -231,7 +297,7 @@ func explicitInteractionKeepsRunningWhilePetIsHovered() async throws {
 
 @MainActor
 @Test
-func explicitWalkKeepsRunningWhilePetIsHovered() async throws {
+func explicitWalkKeepsRunningWhilePetIsHovered() {
     let mine = PetRuntimeState(
         id: .mine,
         displayName: "奶糖",
@@ -248,7 +314,7 @@ func explicitWalkKeepsRunningWhilePetIsHovered() async throws {
 
     world.setPetHovering(.mine, isHovering: true)
     world.walkAll()
-    try await Task.sleep(for: .milliseconds(120))
+    world.advanceMotionForTesting(deltaTime: 0.12)
 
     #expect(world.pets[.mine]?.activity == .walking)
     #expect(world.pets[.mine]?.position != mine.position)
@@ -288,8 +354,8 @@ func kissInteractionApproachesThenEmitsEffectAndCompletes() {
     #expect(cue != nil)
     #expect(mine.facing == .right)
     #expect(partner.facing == .left)
-    #expect(mine.activity == .interacting)
-    #expect(partner.activity == .interacting)
+    #expect(mine.activity == .celebrating)
+    #expect(partner.activity == .celebrating)
     #expect(mine.emotion == .shy)
     #expect(partner.emotion == .happy)
 
@@ -338,6 +404,8 @@ func flowerInteractionHasDistinctOfferPoseAndCompletionEmotion() {
     }
     #expect(mine.emotion == .happy)
     #expect(partner.emotion == .shy)
+    #expect(mine.activity == .offeringGift)
+    #expect(partner.activity == .celebrating)
 
     let completion = interaction.advance(mine: &mine, partner: &partner, deltaTime: 3)
     #expect(completion.completed)

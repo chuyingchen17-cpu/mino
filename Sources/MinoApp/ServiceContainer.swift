@@ -11,12 +11,12 @@ struct ServiceContainer: Sendable {
     }
 
     let configuration: AppConfiguration
-    let backend: any MVPBackendService
-    let realtimeEvents: (any FriendshipEventRealtimeService)?
+    let backend: any AccountBackendService
+    let realtimeSignals: (any AccountEventSignalService)?
     let sessionStore: any SessionCredentialStore
-    let interactionOutbox: any InteractionOutboxStore
+    let socialMutationOutbox: any SocialMutationOutboxStore
     let personalTimelineStore: any PersonalTimelineStore
-    let friendshipEventCursorStore: any FriendshipEventCursorStore
+    let accountEventCursorStore: any AccountEventCursorStore
     let agentMemoryKeyStore: any AgentMemoryKeyStore
     let agentMemoryFileURL: URL?
     let storageMode: StorageMode
@@ -24,17 +24,58 @@ struct ServiceContainer: Sendable {
     static func live(configuration: AppConfiguration) throws -> ServiceContainer {
         let profile = configuration.clientProfile
         let paths = try AppStoragePaths.live(storageNamespace: profile.storageNamespace)
-        let sessionStore = try KeychainSessionCredentialStore(
-            namespace: profile.keychainNamespace
+        let executableIdentity = try KeychainSessionCredentialStore.currentExecutableIdentity()
+        let sessionExecutableFingerprint = KeychainSessionCredentialStore
+            .executableFingerprintForLocalFallback(identity: executableIdentity)
+        let agentMemoryFileURL = paths.rootDirectory.appendingPathComponent(
+            agentMemoryFileName(executableFingerprint: sessionExecutableFingerprint),
+            isDirectory: false
         )
-        let tokenProvider = StoredAccessTokenProvider(store: sessionStore)
+        let sessionStore: any SessionCredentialStore
+        let agentMemoryKeyStore: any AgentMemoryKeyStore
+        if let sessionExecutableFingerprint {
+            // Ad-hoc executables have no stable Keychain designated
+            // requirement. Keep their credentials encrypted in owner-only,
+            // build-scoped files so a relaunch works without a password prompt.
+            let securityDirectory = paths.rootDirectory.appendingPathComponent(
+                localSecurityDirectoryName(
+                    executableFingerprint: sessionExecutableFingerprint
+                ),
+                isDirectory: true
+            )
+            let fileKeyStore = FileAgentMemoryKeyStore(
+                fileURL: securityDirectory.appendingPathComponent(
+                    "local-secret.key",
+                    isDirectory: false
+                )
+            )
+            sessionStore = EncryptedFileSessionCredentialStore(
+                fileURL: securityDirectory.appendingPathComponent(
+                    "session.enc",
+                    isDirectory: false
+                ),
+                keyProvider: fileKeyStore
+            )
+            agentMemoryKeyStore = fileKeyStore
+        } else {
+            sessionStore = try KeychainSessionCredentialStore(
+                namespace: profile.keychainNamespace
+            )
+            agentMemoryKeyStore = try KeychainAgentMemoryKeyStore(
+                namespace: profile.keychainNamespace
+            )
+        }
+        let tokenProvider = StoredAccessTokenProvider(
+            store: sessionStore,
+            configuration: configuration.backend
+        )
         let backend = BackendServiceFactory.make(
             configuration: configuration.backend,
             tokenProvider: tokenProvider
         )
-        let realtimeEvents: (any FriendshipEventRealtimeService)? =
+        let realtimeSignals: (any AccountEventSignalService)? =
             configuration.backend.mode == .remote
-            ? WebSocketFriendshipEventService(
+            ? WebSocketAccountEventSignalService(
                 configuration: configuration.backend,
                 tokenProvider: tokenProvider
             )
@@ -42,36 +83,53 @@ struct ServiceContainer: Sendable {
         return ServiceContainer(
             configuration: configuration,
             backend: backend,
-            realtimeEvents: realtimeEvents,
+            realtimeSignals: realtimeSignals,
             sessionStore: sessionStore,
-            interactionOutbox: FileInteractionOutboxStore(paths: paths),
+            socialMutationOutbox: FileSocialMutationOutboxStore(paths: paths),
             personalTimelineStore: FilePersonalTimelineStore(paths: paths),
-            friendshipEventCursorStore: FileFriendshipEventCursorStore(paths: paths),
-            agentMemoryKeyStore: try KeychainAgentMemoryKeyStore(
-                namespace: profile.keychainNamespace
-            ),
-            agentMemoryFileURL: paths.rootDirectory.appendingPathComponent(
-                "agent-memory.json.enc",
-                isDirectory: false
-            ),
+            accountEventCursorStore: FileAccountEventCursorStore(paths: paths),
+            agentMemoryKeyStore: agentMemoryKeyStore,
+            agentMemoryFileURL: agentMemoryFileURL,
             storageMode: .persistent
         )
     }
 
+    package static func agentMemoryFileName(executableFingerprint: Data?) -> String {
+        guard let executableFingerprint, !executableFingerprint.isEmpty else {
+            return "agent-memory.json.enc"
+        }
+        let suffix = executableFingerprint.prefix(20).map {
+            String(format: "%02x", $0)
+        }.joined()
+        return "agent-memory.executable.\(suffix).json.enc"
+    }
+
+    package static func localSecurityDirectoryName(
+        executableFingerprint: Data
+    ) -> String {
+        let suffix = executableFingerprint.prefix(20).map {
+            String(format: "%02x", $0)
+        }.joined()
+        return "local-security.executable.\(suffix)"
+    }
+
     static func ephemeral(configuration: AppConfiguration) -> ServiceContainer {
         let sessionStore = InMemorySessionCredentialStore()
-        let tokenProvider = StoredAccessTokenProvider(store: sessionStore)
+        let tokenProvider = StoredAccessTokenProvider(
+            store: sessionStore,
+            configuration: configuration.backend
+        )
         return ServiceContainer(
             configuration: configuration,
             backend: BackendServiceFactory.make(
                 configuration: configuration.backend,
                 tokenProvider: tokenProvider
             ),
-            realtimeEvents: nil,
+            realtimeSignals: nil,
             sessionStore: sessionStore,
-            interactionOutbox: InMemoryInteractionOutboxStore(),
+            socialMutationOutbox: InMemorySocialMutationOutboxStore(),
             personalTimelineStore: InMemoryPersonalTimelineStore(),
-            friendshipEventCursorStore: InMemoryFriendshipEventCursorStore(),
+            accountEventCursorStore: InMemoryAccountEventCursorStore(),
             agentMemoryKeyStore: InMemoryAgentMemoryKeyStore(),
             agentMemoryFileURL: nil,
             storageMode: .ephemeral
@@ -79,12 +137,34 @@ struct ServiceContainer: Sendable {
     }
 }
 
-private struct StoredAccessTokenProvider: AccessTokenProvider {
+private actor StoredAccessTokenProvider: AccessTokenProvider {
     let store: any SessionCredentialStore
+    let authenticationBackend: HTTPBackendService
+
+    init(store: any SessionCredentialStore, configuration: BackendConfiguration) {
+        self.store = store
+        authenticationBackend = HTTPBackendService(
+            configuration: configuration,
+            tokenProvider: AnonymousAccessTokenProvider()
+        )
+    }
 
     func accessToken() async throws -> String? {
-        guard let credential = try await store.load(), !credential.needsRefresh() else {
-            return nil
+        guard var credential = try await store.load() else { return nil }
+        if credential.needsRefresh() {
+            guard let refreshToken = credential.refreshToken, !refreshToken.isEmpty else {
+                return nil
+            }
+            let session = try await authenticationBackend.refreshSession(refreshToken)
+            credential = SessionCredential(
+                accountID: session.accountID,
+                deviceID: session.device.id,
+                accessToken: session.accessToken,
+                refreshToken: session.refreshToken,
+                accessTokenExpiresAt: session.accessExpiresAt,
+                issuedAt: Date()
+            )
+            try await store.save(credential)
         }
         return credential.accessToken
     }
