@@ -1,9 +1,9 @@
 # Mino Design Tokens
 
 本文档是 Mino macOS 产品界面的单一视觉规范。界面 token 对应
-`Sources/MinoPresentation/MinoDesignTokens.swift`，角色 token 对应
-`Sources/MinoDomain/PetCharacterModels.swift`、
-`Sources/MinoPresentation/PetFrameAnimationCatalog.swift` 与本文件；页面和组件不得在各自文件中新增随意的 RGB、字号、圆角、间距或角色采样策略。
+`apps/macos/Sources/MinoPresentation/MinoDesignTokens.swift`，角色 token 对应
+`apps/macos/Sources/MinoDomain/PetCharacterModels.swift`、
+`apps/macos/Sources/MinoPresentation/PetFrameAnimationCatalog.swift` 与本文件；页面和组件不得在各自文件中新增随意的 RGB、字号、圆角、间距或角色采样策略。
 
 ## 设计方向
 
@@ -86,7 +86,7 @@ Mino 的界面是“温暖纸感的原生 macOS 社交空间”，而不是网�
 - 轮廓、五官和语义特效都烘焙在经审批的透明 PNG 帧中；运行时不得重描线、主题着色、生成嘴套或用程序化形状补齐缺帧。
 - 每帧的 sprite rect 固定为完整画布；帧播放器只能替换纹理，不能读取 alpha bounds 后重新裁切、居中或改变节点尺寸。
 - 镜像只作用于 `bodyContainer`；`worldAnchor`、影子、气泡、文字和语义图标不得镜像。
-- SpriteKit 使用 `.nearest`，SwiftUI 使用 `.interpolation(.none)`；角色可见内容必须留在画布安全边界内，新增姿势不得靠裁剪或线性采样隐藏触边问题。
+- 产品帧是水彩插画，不是像素画。SpriteKit 使用 `.linear`，SwiftUI 使用 `.interpolation(.medium)`；PNG 可以是 120 或 240 像素，但逻辑画布仍是 `120 × 120`。角色可见内容必须留在画布安全边界内，禁止靠裁剪掩盖触边问题。
 
 ## 圆角、边框与阴影
 
@@ -157,11 +157,12 @@ Mino 的界面是“温暖纸感的原生 macOS 社交空间”，而不是网�
 ### 固定画布像素帧
 
 - 资源根目录固定为 `Resources/PetFrames/<character.rawValue>/<clip.rawValue>/frame-NNN.png`。角色目录使用 `maltese-white`、`retriever-yellow`，clip 目录严格使用 `PetMotionClipID.rawValue`，帧号从 `frame-000.png` 开始连续递增，不允许缺号、别名或通用 `gift` 目录。
-- 每一帧必须是 `120 × 120`、透明背景的 RGBA PNG。禁止按内容裁边、atlas trim、逐帧改变 padding、在帧外追加阴影，或用不同尺寸图片混在同一个 clip；透明画布本身就是稳定坐标系。
+- 每一帧必须落在 `120 × 120` 逻辑画布上，透明背景的 RGBA PNG。磁盘像素可以是 1x（120）或 2x（240）。禁止按内容裁边、atlas trim、逐帧改变 padding、在帧外追加阴影，或用不同逻辑尺寸图片混在同一个 clip；透明画布本身就是稳定坐标系。
 - 源图片坐标以左上为原点，脚底锚点固定为 `(60, 102)`。同一角色以及两个角色的所有帧都必须共享该画布和脚底线；姿势可以改变，但站立脚底和影子不能因 alpha bounds 改变而漂移。
 - 每个 clip 的 manifest 必须声明有序帧、`framesPerSecond`、是否循环和 `reduceMotionFrameIndex`；catalog 再据此计算 `frameDuration`。静态帧索引必须落在该 clip 自己的帧序列内，不能统一借用 `idle`，从而保留“拒绝、送花、贴贴、收信”等语义。
-- SpriteKit 纹理必须使用 `.nearest`，SwiftUI 图像必须使用无插值采样。角色在 1x/2x 屏幕上按整数物理像素倍率呈现；窗口最终原点继续按目标屏幕 `backingScaleFactor` 量化，禁止用线性采样掩盖帧间错位。
-- 默认产品渲染器只能读取上述 PNG 帧。矢量路径、程序化形状和旧 atlas 可以保留为迁移或开发诊断代码，但不得成为缺帧时的静默默认降级；缺帧必须被构建测试阻止。
+- SpriteKit 纹理使用 `.linear`，SwiftUI 图像使用中等插值，以匹配水彩帧而不是像素块。窗口最终原点继续按目标屏幕 `backingScaleFactor` 量化，禁止用采样策略掩盖帧间错位。
+- 播放必须使用 manifest 声明的 `framesPerSecond`。`PetReactionPlan.duration` 只能循环 one-shot 或停在末帧，不得把少量关键帧拉伸成慢放。
+- 默认产品渲染器只能读取上述 PNG 帧。旧 atlas、程序化矢量 rig 和上一套像素生成脚本已从产品路径移除，不得再作为缺帧时的静默降级；缺帧必须被构建测试阻止。
 - 每帧的非透明内容不得触碰画布边缘。阴影属于桌面节点的稳定兄弟节点，不烘焙进角色帧；好友头像、个人页、邀请和空状态默认使用该角色 `idle` 的 Reduce Motion 静态帧。
 
 ### 动作 Clip 与降级
@@ -176,7 +177,7 @@ Mino 的界面是“温暖纸感的原生 macOS 社交空间”，而不是网�
 | 社交与访问 | `letter_give`, `wave`, `welcome` |
 
 - `PetMotionResolver` 是活动、情绪、互动结果、giver/receiver 角色和串门阶段到 clip 的唯一映射点。情绪变化若没有改变实际 clip，不得重启动画。
-- `PetReactionPlan.duration` 是非循环动作的时长事实来源；渲染层不得统一截断为固定时长。
+- `PetReactionPlan.duration` 是非循环动作的语义时长；渲染层按作者帧率播放，时间不够则略加速，时间有余则循环或停在末帧，不得把 4 帧拉伸到数秒。
 - 资产检查必须保证每只角色覆盖全部 clip、帧号连续、PNG 尺寸和透明通道有效、画布与脚底锚点统一、Reduce Motion 索引合法。发布构建不允许缺帧；开发构建若仍遇到损坏资源，必须显式记录资产错误并停止该动作，不能回退到矢量替身或语义不符的 clip。
 - 串门编舞固定为 `walk-in → face companion → welcome`；贴贴和送花分别播放 giver/receiver；结束固定为 `wave → walk-out`。
 

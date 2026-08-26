@@ -17,7 +17,7 @@
 登录正确的 Cloudflare account 后：
 
 ```sh
-cd Backend
+cd apps/worker
 npx wrangler whoami
 npx wrangler d1 create mino-staging
 npx wrangler d1 create mino-production

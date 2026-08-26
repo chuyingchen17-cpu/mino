@@ -6,8 +6,9 @@ set -euo pipefail
 # identity. Default destination is ~/Applications so the copy does not need
 # sudo and is not treated as a notarized product.
 
-project_dir="${0:A:h:h}"
-build_dir="$project_dir/.build"
+root_dir="${0:A:h:h}"
+macos_dir="$root_dir/apps/macos"
+build_dir="$macos_dir/.build"
 source_bundle="$build_dir/Mino.app"
 package_root="$build_dir/Mino-unsigned"
 zip_path="$build_dir/Mino-unsigned.zip"
@@ -25,8 +26,8 @@ Install a local ad-hoc Mino.app without an Apple Developer identity.
   Scripts/install-app.sh                 build and install to ~/Applications/Mino.app
   Scripts/install-app.sh --open          launch the menu-bar app after install
   Scripts/install-app.sh --release       optimized ad-hoc build
-  Scripts/install-app.sh --zip           also write .build/Mino-unsigned.zip
-  Scripts/install-app.sh --skip-build    reuse .build/Mino.app
+  Scripts/install-app.sh --zip           also write apps/macos/.build/Mino-unsigned.zip
+  Scripts/install-app.sh --skip-build    reuse apps/macos/.build/Mino.app
   Scripts/install-app.sh --no-install    build (and optional zip) without copying
   Scripts/install-app.sh --destination PATH
 
@@ -95,7 +96,7 @@ if (( ! skip_build )); then
         export MINO_ALLOW_ADHOC_RELEASE=1
     fi
     MINO_BUILD_CONFIGURATION="$configuration" \
-        "$project_dir/Scripts/build-app.sh" >/dev/null
+        "$root_dir/Scripts/build-app.sh" >/dev/null
 fi
 
 if [[ ! -d "$source_bundle" ]]; then

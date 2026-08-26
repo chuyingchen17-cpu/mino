@@ -1,0 +1,7 @@
+[tasks.test]
+description = "Run Swift package tests"
+run = "swift test --disable-sandbox"
+
+[tasks.build]
+description = "Build the Mino executable"
+run = "swift build --product Mino"

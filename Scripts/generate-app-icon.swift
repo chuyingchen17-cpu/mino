@@ -99,14 +99,14 @@ private struct PixelFrame {
             height: fittedSize.height
         )
 
-        NSGraphicsContext.current?.imageInterpolation = .none
+        NSGraphicsContext.current?.imageInterpolation = .high
         image.draw(
             in: destination,
             from: visibleBounds,
             operation: .sourceOver,
             fraction: 1,
             respectFlipped: false,
-            hints: [.interpolation: NSImageInterpolation.none]
+            hints: [.interpolation: NSImageInterpolation.high]
         )
     }
 }
@@ -259,7 +259,8 @@ do {
     }
 
     let scriptURL = URL(fileURLWithPath: #filePath)
-    let projectDirectory = scriptURL.deletingLastPathComponent().deletingLastPathComponent()
+    let repositoryRoot = scriptURL.deletingLastPathComponent().deletingLastPathComponent()
+    let projectDirectory = repositoryRoot.appendingPathComponent("apps/macos", isDirectory: true)
     let outputDirectory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
     let maltese = try loadCharacterFrame(projectDirectory: projectDirectory, character: "maltese-white")
     let retriever = try loadCharacterFrame(projectDirectory: projectDirectory, character: "retriever-yellow")

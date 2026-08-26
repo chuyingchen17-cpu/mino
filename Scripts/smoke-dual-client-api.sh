@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-project_dir="${0:A:h:h}"
+root_dir="${0:A:h:h}"
+worker_dir="$root_dir/apps/worker"
 api_base_url="${MINO_API_BASE_URL:-http://127.0.0.1:8787}"
 backend_port="${api_base_url##*:}"
 backend_pid=""
@@ -29,12 +30,12 @@ if [[ ! "$api_base_url" =~ '^http://(127\.0\.0\.1|localhost):[0-9]+$' ]]; then
 fi
 
 if ! curl --fail --silent "$api_base_url/v1/health" >/dev/null 2>&1; then
-    if [[ ! -d "$project_dir/Backend/node_modules" ]]; then
-        npm --prefix "$project_dir/Backend" ci
+    if [[ ! -d "$worker_dir/node_modules" ]]; then
+        npm --prefix "$worker_dir" ci
     fi
-    npm --prefix "$project_dir/Backend" run db:migrate:local >/dev/null
+    npm --prefix "$worker_dir" run db:migrate:local >/dev/null
     (
-        cd "$project_dir/Backend"
+        cd "$worker_dir"
         npm run dev -- \
             --ip 127.0.0.1 \
             --port "$backend_port" \

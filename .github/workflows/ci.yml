@@ -25,23 +25,23 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: Backend/package-lock.json
+          cache-dependency-path: apps/worker/package-lock.json
       - name: Install backend dependencies
         run: npm ci
-        working-directory: Backend
+        working-directory: apps/worker
       - name: Typecheck and test in Workers Runtime
         run: |
           npm run typecheck
           npm test
-        working-directory: Backend
+        working-directory: apps/worker
       - name: Verify generated OpenAPI contract
         run: |
           npm run openapi
           git diff --exit-code -- openapi.yaml
-        working-directory: Backend
+        working-directory: apps/worker
       - name: Validate Wrangler bundle and bindings
         run: npm run deploy:dry-run
-        working-directory: Backend
+        working-directory: apps/worker
 
   build-and-test:
     runs-on: macos-latest
@@ -55,7 +55,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: Backend/package-lock.json
+          cache-dependency-path: apps/worker/package-lock.json
       - name: Show toolchain
         run: swift --version
       - name: Run tests
@@ -69,21 +69,21 @@ jobs:
         run: Scripts/build-app.sh
       - name: Validate bundle metadata
         run: |
-          plutil -lint .build/Mino.app/Contents/Info.plist
-          codesign --verify --deep --strict .build/Mino.app
-          codesign -dv --verbose=2 .build/Mino.app
+          plutil -lint apps/macos/.build/Mino.app/Contents/Info.plist
+          codesign --verify --deep --strict apps/macos/.build/Mino.app
+          codesign -dv --verbose=2 apps/macos/.build/Mino.app
       - name: Package unsigned zip
         run: |
           Scripts/install-app.sh --skip-build --no-install --zip
-          shasum -a 256 .build/Mino-unsigned.zip \
+          shasum -a 256 apps/macos/.build/Mino-unsigned.zip \
             | awk '{print $1 "  Mino-unsigned.zip"}' \
-            > .build/Mino-unsigned.zip.sha256
+            > apps/macos/.build/Mino-unsigned.zip.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: Mino-unsigned-macos
           path: |
-            .build/Mino-unsigned.zip
-            .build/Mino-unsigned.zip.sha256
+            apps/macos/.build/Mino-unsigned.zip
+            apps/macos/.build/Mino-unsigned.zip.sha256
           if-no-files-found: error
           retention-days: 14
       - name: Publish GitHub Release
@@ -91,7 +91,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          files=(.build/Mino-unsigned.zip .build/Mino-unsigned.zip.sha256)
+          files=(apps/macos/.build/Mino-unsigned.zip apps/macos/.build/Mino-unsigned.zip.sha256)
           notes="Ad-hoc unsigned macOS build from ${GITHUB_SHA:0:7}. Not Developer ID signed. Install: curl -fsSL https://raw.githubusercontent.com/liyown/mino/main/Scripts/install.sh | zsh"
           if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
             gh release create "$GITHUB_REF_NAME" "${files[@]}" \

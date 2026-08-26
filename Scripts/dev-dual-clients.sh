@@ -3,11 +3,13 @@
 set -euo pipefail
 setopt NO_BG_NICE
 
-project_dir="${0:A:h:h}"
+root_dir="${0:A:h:h}"
+macos_dir="$root_dir/apps/macos"
+worker_dir="$root_dir/apps/worker"
 api_base_url="${MINO_API_BASE_URL:-http://127.0.0.1:8080}"
 api_version="${MINO_API_VERSION:-v1}"
 configuration="${MINO_BUILD_CONFIGURATION:-debug}"
-cache_dir="${MINO_CACHE_DIR:-$project_dir/.cache}"
+cache_dir="${MINO_CACHE_DIR:-$root_dir/.cache}"
 
 for command_name in curl swift npm node ditto plutil codesign; do
     if (( ! $+commands[$command_name] )); then
@@ -50,13 +52,13 @@ start_backend_if_needed() {
         return
     fi
 
-    if [[ ! -d "$project_dir/Backend/node_modules" ]]; then
-        npm --prefix "$project_dir/Backend" ci
+    if [[ ! -d "$worker_dir/node_modules" ]]; then
+        npm --prefix "$worker_dir" ci
     fi
 
-    npm --prefix "$project_dir/Backend" run db:migrate:local
+    npm --prefix "$worker_dir" run db:migrate:local
     (
-        cd "$project_dir/Backend"
+        cd "$worker_dir"
         npm run dev -- \
             --ip 127.0.0.1 \
             --port "$backend_port" \
@@ -105,10 +107,10 @@ env \
     MINO_BACKEND_MODE=remote \
     MINO_API_BASE_URL="$api_base_url" \
     MINO_API_VERSION="$api_version" \
-    "$project_dir/Scripts/build-app.sh" >/dev/null
+    "$root_dir/Scripts/build-app.sh" >/dev/null
 
-base_bundle="$project_dir/.build/Mino.app"
-dual_bundle_root="$project_dir/.build/dual-clients"
+base_bundle="$macos_dir/.build/Mino.app"
+dual_bundle_root="$macos_dir/.build/dual-clients"
 rm -rf "$dual_bundle_root"
 mkdir -p "$dual_bundle_root"
 

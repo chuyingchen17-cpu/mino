@@ -1,0 +1,23 @@
+monorepo_root = true
+
+[tools]
+node = "22"
+
+[monorepo]
+config_roots = ["apps/*"]
+
+[tasks.test]
+description = "Run macOS client tests and Worker checks"
+run = "Scripts/test.sh"
+
+[tasks.build]
+description = "Build the unsigned macOS app bundle"
+run = "Scripts/build-app.sh"
+
+[tasks.dev]
+description = "Start the Worker and two isolated debug clients"
+run = "MINO_API_BASE_URL=http://127.0.0.1:8787 Scripts/dev-dual-clients.sh"
+
+[tasks.install]
+description = "Build and install the ad-hoc app to ~/Applications"
+run = "Scripts/install-app.sh --release --open"

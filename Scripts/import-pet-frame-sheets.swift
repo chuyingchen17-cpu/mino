@@ -60,11 +60,14 @@ private struct CharacterSource {
     let bodyPixel: (UInt8, UInt8, UInt8) -> Bool
 }
 
-private let canvasSize = 120
-private let targetBodyCenterX = 60
+private let logicalCanvasSize = 120
+private let pixelScale = 2
+private let canvasSize = logicalCanvasSize * pixelScale
+private let targetBodyCenterX = 60 * pixelScale
 // Generated sheets are decoded top-to-bottom. Keeping the body-fill baseline at
 // y=99 leaves the 2-3 px outline on the public manifest's y=102 ground anchor.
-private let targetBodyFillBottomY = 99
+private let targetBodyFillBottomY = 99 * pixelScale
+private let loopingClips: Set<String> = ["idle", "walk", "sleep"]
 
 private let sequences: [(clip: String, frames: [FrameSource])] = [
     ("idle", [.init(sheet: .base, index: 0), .init(sheet: .base, index: 1), .init(sheet: .base, index: 2), .init(sheet: .base, index: 3)]),
@@ -114,9 +117,29 @@ private func decode(_ url: URL) throws -> RGBAImage {
     // CGImageDestination interprets the first bitmap row as the visual top.
     // Drawing without an extra coordinate flip keeps the imported sheet in the
     // same orientation when the raw buffer is encoded again.
-    context.interpolationQuality = .none
+    context.interpolationQuality = .high
     context.draw(image, in: CGRect(x: 0, y: 0, width: result.width, height: result.height))
     return result
+}
+
+private func makeCGImage(_ image: RGBAImage) -> CGImage? {
+    let data = Data(image.pixels)
+    guard let provider = CGDataProvider(data: data as CFData) else { return nil }
+    return CGImage(
+        width: image.width,
+        height: image.height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 32,
+        bytesPerRow: image.width * 4,
+        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        bitmapInfo: CGBitmapInfo(
+            rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ),
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: true,
+        intent: .defaultIntent
+    )
 }
 
 private func extractCell(_ source: RGBAImage, index: Int) -> RGBAImage {
@@ -128,19 +151,62 @@ private func extractCell(_ source: RGBAImage, index: Int) -> RGBAImage {
     let maxY = (row + 1) * source.height / 4
     let cellWidth = maxX - minX
     let cellHeight = maxY - minY
-    var result = RGBAImage(width: canvasSize, height: canvasSize)
-    let inset = 8
-    let renderSize = canvasSize - inset * 2
-
-    // Intentionally nearest-neighbour: these are authored pixel frames, not
-    // illustrations to be softened by interpolation.
-    for y in 0..<renderSize {
-        let sourceY = minY + min(cellHeight - 1, y * cellHeight / renderSize)
-        for x in 0..<renderSize {
-            let sourceX = minX + min(cellWidth - 1, x * cellWidth / renderSize)
+    var cell = RGBAImage(width: cellWidth, height: cellHeight)
+    for y in 0..<cellHeight {
+        for x in 0..<cellWidth {
             for channel in 0..<4 {
-                result[x + inset, y + inset, channel] = source[sourceX, sourceY, channel]
+                cell[x, y, channel] = source[minX + x, minY + y, channel]
             }
+        }
+    }
+
+    var result = RGBAImage(width: canvasSize, height: canvasSize)
+    guard let cellImage = makeCGImage(cell) else { return result }
+    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    result.pixels.withUnsafeMutableBytes { buffer in
+        guard let context = CGContext(
+            data: buffer.baseAddress,
+            width: canvasSize,
+            height: canvasSize,
+            bitsPerComponent: 8,
+            bytesPerRow: canvasSize * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else {
+            return
+        }
+        context.interpolationQuality = .high
+        let inset = 16
+        let renderSize = canvasSize - inset * 2
+        context.draw(
+            cellImage,
+            in: CGRect(x: inset, y: inset, width: renderSize, height: renderSize)
+        )
+    }
+    return result
+}
+
+private func blend(_ first: RGBAImage, _ second: RGBAImage, t: Double) -> RGBAImage {
+    var result = RGBAImage(width: first.width, height: first.height)
+    let keep = 1 - t
+    for index in 0..<first.pixels.count {
+        let mixed = Double(first.pixels[index]) * keep + Double(second.pixels[index]) * t
+        result.pixels[index] = UInt8(min(255, mixed.rounded()))
+    }
+    return result
+}
+
+private func expandedFrames(_ frames: [RGBAImage], loops: Bool) -> [RGBAImage] {
+    guard frames.count >= 2 else { return frames }
+    var result: [RGBAImage] = []
+    result.reserveCapacity(frames.count * 2)
+    for index in 0..<frames.count {
+        result.append(frames[index])
+        let next = index + 1
+        if next < frames.count {
+            result.append(blend(frames[index], frames[next], t: 0.5))
+        } else if loops {
+            result.append(blend(frames[index], frames[0], t: 0.5))
         }
     }
     return result
@@ -329,7 +395,7 @@ private func alignBody(
     return result
 }
 
-private func clearSafetyBorder(in image: inout RGBAImage, width: Int = 4) {
+private func clearSafetyBorder(in image: inout RGBAImage, width: Int = 8) {
     for y in 0..<image.height {
         for x in 0..<image.width where x < width || y < width || x >= image.width - width || y >= image.height - width {
             let base = ((y * image.width) + x) * 4
@@ -341,7 +407,7 @@ private func clearSafetyBorder(in image: inout RGBAImage, width: Int = 4) {
     }
 }
 
-private func clearBelowGround(in image: inout RGBAImage, groundY: Int = 102) {
+private func clearBelowGround(in image: inout RGBAImage, groundY: Int = 204) {
     guard groundY + 1 < image.height else { return }
     for y in (groundY + 1)..<image.height {
         for x in 0..<image.width {
@@ -418,6 +484,8 @@ private func render(_ character: CharacterSource, outputRoot: URL) throws -> Int
             .appending(path: character.id, directoryHint: .isDirectory)
             .appending(path: sequence.clip, directoryHint: .isDirectory)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        var keyframes: [RGBAImage] = []
+        keyframes.reserveCapacity(sequence.frames.count)
         for (index, source) in sequence.frames.enumerated() {
             var frame = extractCell(source.sheet == .base ? base : actions, index: source.index)
             if character.removesLightBackground {
@@ -436,6 +504,13 @@ private func render(_ character: CharacterSource, outputRoot: URL) throws -> Int
             // as an invalid atlas because it can clip while mirroring, so every
             // exported frame owns an explicit transparent safety border.
             clearSafetyBorder(in: &frame)
+            keyframes.append(frame)
+        }
+        let frames = expandedFrames(
+            keyframes,
+            loops: loopingClips.contains(sequence.clip)
+        )
+        for (index, frame) in frames.enumerated() {
             let destination = directory.appending(path: String(format: "frame-%03d.png", index))
             try encode(frame, to: destination)
             written += 1

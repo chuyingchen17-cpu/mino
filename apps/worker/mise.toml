@@ -1,0 +1,22 @@
+[tools]
+node = "22"
+
+[tasks.install]
+description = "Install Worker npm dependencies"
+run = "npm ci"
+
+[tasks.dev]
+description = "Run the local Cloudflare Worker"
+run = "npm run dev -- --ip 127.0.0.1 --port 8787"
+
+[tasks.test]
+description = "Typecheck and test the Worker"
+run = "npm run typecheck && npm test"
+
+[tasks.migrate]
+description = "Apply local D1 migrations"
+run = "npm run db:migrate:local"
+
+[tasks.openapi]
+description = "Regenerate OpenAPI from routes"
+run = "npm run openapi"

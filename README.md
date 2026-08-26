@@ -25,11 +25,13 @@ nightly 只在 `main` 的测试和 release 构建都通过后更新。若还没�
 要求：macOS 14+、Swift 6.2+、Node.js 20+。后端直接运行在本地 Cloudflare Workers Runtime，不需要 Docker 或 PostgreSQL。
 
 ```sh
-cp Backend/.env.example Backend/.dev.vars
-npm --prefix Backend ci
-npm --prefix Backend run db:migrate:local
-npm --prefix Backend run dev -- --ip 127.0.0.1 --port 8787
+cp apps/worker/.env.example apps/worker/.dev.vars
+npm --prefix apps/worker ci
+npm --prefix apps/worker run db:migrate:local
+npm --prefix apps/worker run dev -- --ip 127.0.0.1 --port 8787
 ```
+
+用 [mise](https://mise.jdx.dev/) 时，在仓库根执行 `mise install`，然后 `mise //apps/worker:dev`、`mise //apps/macos:test` 或 `mise test`。没有 mise 时继续用下面的 `Scripts/`。
 
 另一个终端可启动 Alice / Bob 两个隔离的 Debug 客户端：
 
@@ -39,8 +41,8 @@ MINO_API_BASE_URL=http://127.0.0.1:8787 Scripts/dev-dual-clients.sh
 
 脚本会在后端未运行时自动迁移本地 D1 并启动 Wrangler，然后生成：
 
-- `.build/dual-clients/Mino-alice.app`
-- `.build/dual-clients/Mino-bob.app`
+- `apps/macos/.build/dual-clients/Mino-alice.app`
+- `apps/macos/.build/dual-clients/Mino-bob.app`
 
 若只想验证双账号完整协议，不打开 GUI：
 
@@ -65,12 +67,12 @@ Scripts/install-app.sh --release --open
 ```
 
 ```sh
-Scripts/install-app.sh --zip           # 额外打出 .build/Mino-unsigned.zip
+Scripts/install-app.sh --zip           # 额外打出 apps/macos/.build/Mino-unsigned.zip
 ```
 
 `--zip` 里带 `Install-Mino.command`。只拷贝 `Mino.app` 会丢掉安装脚本。这个包不能当作正式分发版本。
 
-单独产出 `.build/Mino.app`：
+单独产出 `apps/macos/.build/Mino.app`：
 
 ```sh
 Scripts/build-app.sh
@@ -102,18 +104,21 @@ Worker 写入业务状态、每个收件人的 Account Event 和幂等回执后�
 主要目录：
 
 ```text
-Sources/MinoDomain/          领域模型、Visit 投影、命令和服务协议
-Sources/MinoAgent/           本地 Agent、策略护栏和加密记忆
-Sources/MinoRuntime/         本地宠物移动、动画与可见状态
-Sources/MinoPresentation/    AppKit / SpriteKit / SwiftUI
-Sources/MinoInfrastructure/  Worker REST、账号 WebSocket 与配置
-Sources/MinoPersistence/     账号事件游标、个人时间线、社交 Outbox
-Sources/MinoSecurity/        Keychain／加密会话与记忆密钥
-Sources/MinoApp/             同步、Visit、对话和 Agent 协调器
-Backend/                     Cloudflare Worker、D1 migrations、Durable Object
+apps/macos/                  Swift 6.2 macOS 客户端（SwiftPM）
+  Sources/MinoDomain/        领域模型、Visit 投影、命令和服务协议
+  Sources/MinoAgent/         本地 Agent、策略护栏和加密记忆
+  Sources/MinoRuntime/       本地宠物移动、动画与可见状态
+  Sources/MinoPresentation/  AppKit / SpriteKit / SwiftUI
+  Sources/MinoInfrastructure/ Worker REST、账号 WebSocket 与配置
+  Sources/MinoPersistence/   账号事件游标、个人时间线、社交 Outbox
+  Sources/MinoSecurity/      Keychain／加密会话与记忆密钥
+  Sources/MinoApp/           同步、Visit、对话和 Agent 协调器
+apps/worker/                 Cloudflare Worker、D1 migrations、Durable Object
+Scripts/                     仓库级构建、测试与安装入口
+mise.toml                    工具版本与 monorepo 任务
 ```
 
-机器可读协议为 [`Backend/openapi.yaml`](Backend/openapi.yaml)。详细设计见 [`Docs/Architecture.md`](Docs/Architecture.md)、[`Docs/VisitProtocol.md`](Docs/VisitProtocol.md) 与 [`Docs/EventSynchronization.md`](Docs/EventSynchronization.md)；视觉规范见 [`Docs/DesignTokens.md`](Docs/DesignTokens.md)，部署见 [`Docs/CloudflareDeployment.md`](Docs/CloudflareDeployment.md)。
+机器可读协议为 [`apps/worker/openapi.yaml`](apps/worker/openapi.yaml)。详细设计见 [`Docs/Architecture.md`](Docs/Architecture.md)、[`Docs/VisitProtocol.md`](Docs/VisitProtocol.md) 与 [`Docs/EventSynchronization.md`](Docs/EventSynchronization.md)；视觉规范见 [`Docs/DesignTokens.md`](Docs/DesignTokens.md)，部署见 [`Docs/CloudflareDeployment.md`](Docs/CloudflareDeployment.md)。
 
 ## MVP 边界
 

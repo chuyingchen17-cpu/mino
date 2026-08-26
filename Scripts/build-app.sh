@@ -2,11 +2,12 @@
 
 set -euo pipefail
 
-project_dir="${0:A:h:h}"
-build_dir="$project_dir/.build"
+root_dir="${0:A:h:h}"
+macos_dir="$root_dir/apps/macos"
+build_dir="$macos_dir/.build"
 bundle_dir="$build_dir/Mino.app"
 staging_dir="$build_dir/Mino.app.staging"
-cache_dir="${MINO_CACHE_DIR:-$project_dir/.cache}"
+cache_dir="${MINO_CACHE_DIR:-$root_dir/.cache}"
 configuration="${MINO_BUILD_CONFIGURATION:-debug}"
 marketing_version="${MINO_MARKETING_VERSION:-0.1.0}"
 build_number="${MINO_BUILD_NUMBER:-1}"
@@ -62,7 +63,7 @@ fi
 mkdir -p "$cache_dir/clang" "$cache_dir/swiftpm" "$cache_dir/config" "$cache_dir/security"
 
 env CLANG_MODULE_CACHE_PATH="$cache_dir/clang" swift build \
-    --package-path "$project_dir" \
+    --package-path "$macos_dir" \
     --product Mino \
     --configuration "$configuration" \
     --disable-sandbox \
@@ -90,12 +91,12 @@ cp -R "$presentation_resource_bundle/PetFrames" \
     "$staging_dir/Contents/Resources/PetFrames"
 rm -rf "$app_iconset_dir"
 mkdir -p "$app_iconset_dir"
-/usr/bin/xcrun swift "$project_dir/Scripts/generate-app-icon.swift" "$app_iconset_dir"
+/usr/bin/xcrun swift "$root_dir/Scripts/generate-app-icon.swift" "$app_iconset_dir"
 /usr/bin/iconutil --convert icns \
     --output "$staging_dir/Contents/Resources/Mino.icns" \
     "$app_iconset_dir"
 rm -rf "$app_iconset_dir"
-cp "$project_dir/Support/Info.plist" "$staging_dir/Contents/Info.plist"
+cp "$macos_dir/Support/Info.plist" "$staging_dir/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$marketing_version" "$staging_dir/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$build_number" "$staging_dir/Contents/Info.plist"
 plutil -replace MinoBackendMode -string "$backend_mode" "$staging_dir/Contents/Info.plist"
@@ -107,7 +108,7 @@ plutil -lint "$staging_dir/Contents/Info.plist" >/dev/null
 if [[ -n "${MINO_CODE_SIGN_IDENTITY:-}" ]]; then
     codesign --force \
         --options runtime \
-        --entitlements "$project_dir/Support/Mino.entitlements" \
+        --entitlements "$macos_dir/Support/Mino.entitlements" \
         --sign "$MINO_CODE_SIGN_IDENTITY" \
         "$staging_dir"
 else

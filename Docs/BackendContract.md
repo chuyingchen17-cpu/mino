@@ -1,6 +1,6 @@
 # Worker API 契约
 
-机器可读契约以 [`Backend/openapi.yaml`](../Backend/openapi.yaml) 为准。所有时间为 Unix milliseconds。成功信封为 `{"data": ...}`，错误信封为 `{"error":{"code":"...","message":"..."}}`。
+机器可读契约以 [`apps/worker/openapi.yaml`](../apps/worker/openapi.yaml) 为准。所有时间为 Unix milliseconds。成功信封为 `{"data": ...}`，错误信封为 `{"error":{"code":"...","message":"..."}}`。
 
 除 health、GitHub Device Flow、refresh 和启用后的 dev bootstrap 外，所有接口要求 `Authorization: Bearer <accessToken>`。业务 mutation 还要求 UUID `Idempotency-Key` header；command body 不重复传输该 key。
 
