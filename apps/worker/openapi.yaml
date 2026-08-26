@@ -4851,6 +4851,37 @@ paths:
                       type: string
                       minLength: 1
                       maxLength: 128
+                    ownerPresence:
+                      type: string
+                      enum:
+                        - unknown
+                        - present
+                        - away
+                    ownerActivity:
+                      type: string
+                      enum:
+                        - idle
+                        - listening_to_music
+                    companionPresent:
+                      type: boolean
+                    careFullness:
+                      type: string
+                      enum:
+                        - low
+                        - steady
+                        - high
+                    careEnergy:
+                      type: string
+                      enum:
+                        - low
+                        - steady
+                        - high
+                    careMood:
+                      type: string
+                      enum:
+                        - low
+                        - steady
+                        - high
                   additionalProperties: false
                 memories:
                   type: array
