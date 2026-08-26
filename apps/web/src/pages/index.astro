@@ -1,0 +1,30 @@
+---
+/**
+ * 首页。
+ *
+ * 当前只实现 Hero + 安装区（方向 2 的第一版），其余 Section 按 README 的蓝图依次补齐。
+ * 页面自身不写文案，全部来自 src/content/site.ts。
+ */
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Navbar from '~/components/marketing/Navbar.astro';
+import Hero from '~/components/marketing/Hero.astro';
+import Install from '~/components/marketing/Install.astro';
+import Footer from '~/components/marketing/Footer.astro';
+import { site } from '~/content/site';
+import { frameUrl } from '~/lib/petFrames';
+---
+
+<BaseLayout
+  title={site.tagline}
+  description={site.description}
+  path="/"
+  structuredData="home"
+  preloadImage={frameUrl('maltese-white', 'idle', 0)}
+>
+  <Navbar />
+  <main id="main">
+    <Hero />
+    <Install />
+  </main>
+  <Footer />
+</BaseLayout>

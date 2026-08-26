@@ -1,0 +1,79 @@
+---
+/**
+ * 桌宠场景。
+ *
+ * 这是按 Docs/DesignTokens.md 的真实规格复刻的 UI，不是编造的产品图：
+ * - 贴身操作条固定 252 × 42pt，固定四个入口：投喂、陪玩、散步、更多；
+ * - 气泡最大 224 × 58pt，最多两行；
+ * - 角色用真实 idle 帧，脚底锚点固定，影子是稳定的兄弟节点而非烘焙进帧；
+ * - 菜单栏图标表达「住在菜单栏里，没有 Dock 图标」。
+ *
+ * 待 App 出真实截图后，这里应替换为截图。
+ */
+import { Cookie, Ellipsis, Footprints, Volleyball } from 'lucide-react';
+import PetClipPlayer from '~/components/interactive/PetClipPlayer';
+import { frameUrl } from '~/lib/petFrames';
+
+const menuBarMark = frameUrl('maltese-white', 'idle', 0);
+
+const actions = [
+  { label: '投喂', Icon: Cookie },
+  { label: '陪玩', Icon: Volleyball },
+  { label: '散步', Icon: Footprints },
+  { label: '更多', Icon: Ellipsis },
+];
+---
+
+<div class="relative overflow-hidden rounded-prominent border border-line bg-surface shadow-card">
+  {/* 菜单栏：宠物住在这里，没有 Dock 图标 */}
+  <div
+    class="flex items-center justify-between border-b border-line bg-surface-raised px-4 py-2 text-faint"
+  >
+    <span class="font-rounded text-xs font-bold text-coral">Mino</span>
+    <div class="flex items-center gap-3">
+      <span class="text-[11px]">菜单栏常驻</span>
+      <span class="flex size-6 items-center justify-center rounded-md bg-coral-soft">
+        <img src={menuBarMark} alt="" width="18" height="18" data-pet-frame class="size-[18px]" />
+      </span>
+    </div>
+  </div>
+
+  {/* 桌面区域 */}
+  <div class="relative flex min-h-[300px] flex-col items-center justify-end gap-3 px-6 pt-8 pb-10">
+    {/* 即时回应气泡：最多两行，默认显示 2.4s */}
+    <div
+      class="max-w-[224px] rounded-[18px] border border-line bg-surface-raised px-4 py-2.5 text-center text-[13px] leading-snug text-ink shadow-card"
+    >
+      被摸到了，尾巴摇了一下。
+    </div>
+
+    {/* 贴身操作条：固定 252 × 42pt，四个固定入口 */}
+    <div
+      class="flex h-[42px] w-[252px] items-center justify-around rounded-[14px] border border-line bg-surface-raised px-1 shadow-card"
+    >
+      {
+        actions.map(({ label, Icon }) => (
+          <span class="flex items-center gap-1.5 px-2 text-[11px] font-semibold text-muted">
+            <Icon size={14} aria-hidden="true" />
+            {label}
+          </span>
+        ))
+      }
+    </div>
+
+    {/* 角色 + 稳定影子。影子不烘焙进帧，脚底线固定。 */}
+    <div class="relative flex flex-col items-center">
+      <PetClipPlayer
+        character="maltese-white"
+        clip="idle"
+        size={200}
+        eager={true}
+        label="Mino 的白色马尔济斯"
+        client:load
+      />
+      <span
+        class="mt-[-18px] h-2 w-20 rounded-full bg-ink/8 blur-[2px]"
+        aria-hidden="true"></span>
+    </div>
+  </div>
+</div>

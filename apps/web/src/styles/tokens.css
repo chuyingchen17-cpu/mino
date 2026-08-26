@@ -1,0 +1,156 @@
+/*
+ * Mino 产品页 Design Token。
+ *
+ * 与 Docs/DesignTokens.md 和 apps/macos/Sources/MinoPresentation/MinoDesignTokens.swift 同源。
+ * 组件里不允许再写任意 hex、字号、圆角或间距——需要新值时先在这里定义语义 token。
+ * 更换产品品牌时主要改这一个文件。
+ */
+
+@import 'tailwindcss';
+
+/* 深色以 .dark 类为准，未显式指定时跟随系统。 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light dark;
+
+  /* 颜色：Light */
+  --mino-canvas: #fbf7f2; /* 页面底色 */
+  --mino-sidebar: #f3ebe3; /* 次级区块底色 */
+  --mino-surface: #fffdfc; /* 卡片 */
+  --mino-surface-raised: #ffffff; /* 悬浮与强调表面 */
+  --mino-ink: #302824; /* 主文字、图标 */
+  --mino-muted: #6d625c; /* 辅助文字 */
+  --mino-faint: #948983; /* 时间、占位说明 */
+  --mino-coral: #e8545b; /* 品牌、主按钮、选中态 */
+  --mino-coral-pressed: #cd424a;
+  --mino-coral-soft: #fbe7e5; /* 选中背景、品牌弱表面 */
+  --mino-mint: #197a68; /* 成功、在线、已同步 */
+  --mino-mint-soft: #e4f3ee;
+  --mino-warning: #a96713; /* 等待和提醒 */
+  --mino-danger: #b83e45;
+  --mino-line: #ded4cc; /* 边框与分隔线 */
+  --mino-focus: #b8333c; /* 键盘焦点环 */
+
+  /* 官方角色配色。角色配色属于资产协议，不随主题或强调色改写。 */
+  --pet-maltese-body: #fffefa;
+  --pet-maltese-ink: #141414;
+  --pet-retriever-body: #f0d6ab;
+  --pet-retriever-ink: #302929;
+  --pet-accent: #ff5c61; /* 黄狗固定项圈、爱心、花朵 */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --mino-canvas: #1d1816;
+    --mino-sidebar: #241e1b;
+    --mino-surface: #2b2420;
+    --mino-surface-raised: #342a26;
+    --mino-ink: #f7f0eb;
+    --mino-muted: #c5b8b0;
+    --mino-faint: #9f928b;
+    --mino-coral: #ff7c82;
+    --mino-coral-pressed: #e9646b;
+    --mino-coral-soft: #48292b;
+    --mino-mint: #58c9ae;
+    --mino-mint-soft: #203d36;
+    --mino-warning: #f0b861;
+    --mino-danger: #ff8589;
+    --mino-line: #493e38;
+    --mino-focus: #ff9ba0;
+  }
+}
+
+.dark {
+  --mino-canvas: #1d1816;
+  --mino-sidebar: #241e1b;
+  --mino-surface: #2b2420;
+  --mino-surface-raised: #342a26;
+  --mino-ink: #f7f0eb;
+  --mino-muted: #c5b8b0;
+  --mino-faint: #9f928b;
+  --mino-coral: #ff7c82;
+  --mino-coral-pressed: #e9646b;
+  --mino-coral-soft: #48292b;
+  --mino-mint: #58c9ae;
+  --mino-mint-soft: #203d36;
+  --mino-warning: #f0b861;
+  --mino-danger: #ff8589;
+  --mino-line: #493e38;
+  --mino-focus: #ff9ba0;
+}
+
+/* inline 让工具类引用上面的变量，深浅色切换不需要重复生成两套类。 */
+@theme inline {
+  --color-canvas: var(--mino-canvas);
+  --color-sidebar: var(--mino-sidebar);
+  --color-surface: var(--mino-surface);
+  --color-surface-raised: var(--mino-surface-raised);
+  --color-ink: var(--mino-ink);
+  --color-muted: var(--mino-muted);
+  --color-faint: var(--mino-faint);
+  --color-coral: var(--mino-coral);
+  --color-coral-pressed: var(--mino-coral-pressed);
+  --color-coral-soft: var(--mino-coral-soft);
+  --color-mint: var(--mino-mint);
+  --color-mint-soft: var(--mino-mint-soft);
+  --color-warning: var(--mino-warning);
+  --color-danger: var(--mino-danger);
+  --color-line: var(--mino-line);
+  --color-focus: var(--mino-focus);
+
+  /* 排版：只用系统字体，不引入 Web Font。 */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', system-ui, sans-serif;
+  --font-rounded:
+    ui-rounded, 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, 'PingFang SC', system-ui,
+    sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
+
+  /* 圆角，对应 App 的 control / card / prominent / capsule。 */
+  --radius-control: 10px;
+  --radius-card: 16px;
+  --radius-prominent: 20px;
+
+  /* 阴影：单层，禁止多层高光、强玻璃模糊和随机投影。 */
+  --shadow-card: 0 4px 12px rgb(48 40 36 / 0.08);
+  --shadow-raised: 0 6px 20px rgb(48 40 36 / 0.1);
+
+  /* 4pt 基线之外，营销页需要的纵向节奏与容器宽度。 */
+  --spacing-section: 5rem; /* 80px，移动端 */
+  --spacing-section-lg: 7.5rem; /* 120px，桌面端 */
+  --container-content: 46rem; /* 长文本阅读宽度 */
+  --container-page: 75rem; /* 1200px 主内容宽度 */
+}
+
+@layer base {
+  body {
+    background-color: var(--mino-canvas);
+    color: var(--mino-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 焦点必须可见，且不改变布局尺寸。 */
+  :focus-visible {
+    outline: 2px solid var(--mino-focus);
+    outline-offset: 2px;
+  }
+
+  /* 角色帧是水彩插画而非像素画，缩放用平滑插值。 */
+  img[data-pet-frame] {
+    image-rendering: auto;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

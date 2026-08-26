@@ -1,0 +1,15 @@
+---
+/**
+ * 统一卡片表面语法：surface 底 + 1px line 边框 + 单层阴影。
+ * 禁止多层高光、玻璃拟态和随机投影。
+ */
+interface Props {
+  class?: string;
+}
+
+const { class: className = '' } = Astro.props;
+---
+
+<div class={`rounded-card border border-line bg-surface shadow-card ${className}`}>
+  <slot />
+</div>

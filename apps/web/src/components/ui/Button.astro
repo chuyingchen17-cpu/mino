@@ -1,0 +1,65 @@
+---
+/**
+ * Button。参考 shadcn/ui 的 API 思路，但样式自行维护，不引入组件库。
+ *
+ * 规则来自 Docs/DesignTokens.md：
+ * - 主按钮每屏最多一个；
+ * - hover / press 只改颜色或透明度，不改布局尺寸；
+ * - 过渡 160–240ms；
+ * - 有 href 时渲染 <a>，否则渲染 <button>，语义不混用。
+ */
+interface Props {
+  variant?: 'primary' | 'secondary' | 'text';
+  size?: 'md' | 'lg';
+  href?: string;
+  type?: 'button' | 'submit';
+  /** 外链自动补 rel，站内锚点不加。 */
+  external?: boolean;
+  class?: string;
+  [key: string]: unknown;
+}
+
+const {
+  variant = 'primary',
+  size = 'md',
+  href,
+  type = 'button',
+  external = false,
+  class: className = '',
+  ...rest
+} = Astro.props;
+
+const base =
+  'inline-flex items-center justify-center gap-2 rounded-control font-semibold transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-60';
+
+const variants = {
+  primary: 'bg-coral text-white hover:bg-coral-pressed',
+  secondary: 'bg-surface-raised text-ink border border-line hover:bg-coral-soft',
+  text: 'text-ink hover:text-coral',
+};
+
+// 控件高度对齐 App：普通 40pt、主操作 44pt。
+const sizes = {
+  md: 'h-10 px-4 text-sm',
+  lg: 'h-11 px-5 text-[15px]',
+};
+
+const classes = `${base} ${variants[variant]} ${sizes[size]} ${className}`;
+---
+
+{
+  href ? (
+    <a
+      href={href}
+      class={classes}
+      {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+      {...rest}
+    >
+      <slot />
+    </a>
+  ) : (
+    <button type={type} class={classes} {...rest}>
+      <slot />
+    </button>
+  )
+}

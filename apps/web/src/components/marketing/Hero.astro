@@ -1,0 +1,56 @@
+---
+/**
+ * Hero。结构固定为：Eyebrow → 产品定义 → 1~2 行说明 → 双 CTA → 产品视觉。
+ * 不写抽象 slogan，第一屏就说清这是什么、归属于谁、下一步做什么。
+ */
+import { Github } from 'lucide-react';
+import Button from '~/components/ui/Button.astro';
+import Container from '~/components/ui/Container.astro';
+import PetDesktopScene from './PetDesktopScene.astro';
+import { hero, requirements } from '~/content/site';
+---
+
+<section class="pt-16 pb-(--spacing-section) lg:pt-24 lg:pb-(--spacing-section-lg)">
+  <Container>
+    <div class="grid items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,520px)] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold tracking-wide text-coral">{hero.eyebrow}</p>
+
+        {/* 每行独占一行，避开中文自动换行把词拆开。 */}
+        <h1
+          class="mt-4 font-rounded text-[1.75rem] leading-[1.25] font-bold tracking-tight sm:text-4xl sm:leading-[1.2] lg:text-[3.25rem] lg:leading-[1.15]"
+        >
+          {hero.headingLines.map((line) => <span class="block">{line}</span>)}
+        </h1>
+
+        <p class="mt-5 max-w-xl text-base leading-relaxed text-muted text-pretty sm:text-lg">
+          {hero.body}
+        </p>
+
+        <div class="mt-8 flex flex-wrap items-center gap-3">
+          <Button href={hero.primaryCta.href} size="lg" data-track-cta="hero">
+            {hero.primaryCta.label}
+          </Button>
+          <Button
+            href={hero.secondaryCta.href}
+            variant="secondary"
+            size="lg"
+            external
+            data-track-github="hero"
+          >
+            <Github size={16} aria-hidden="true" />
+            {hero.secondaryCta.label}
+          </Button>
+        </div>
+
+        <p class="mt-5 text-sm text-faint">
+          {requirements.os} · {requirements.chip} · {requirements.note}
+        </p>
+      </div>
+
+      <div class="lg:justify-self-end">
+        <PetDesktopScene />
+      </div>
+    </div>
+  </Container>
+</section>

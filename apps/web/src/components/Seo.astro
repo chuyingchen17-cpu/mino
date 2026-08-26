@@ -1,0 +1,88 @@
+---
+/**
+ * 统一 SEO 层。页面只传数据，不自己手写 <head>。
+ * 结构化数据按页面类型注入，没有真实价格时不写 offers。
+ */
+import { site } from '~/content/site';
+import { requirements } from '~/content/site';
+
+interface Props {
+  title: string;
+  description: string;
+  /** 相对路径，例如 "/" 或 "/changelog"。 */
+  path?: string;
+  ogImage?: string;
+  /** 首页注入 SoftwareApplication + Organization。 */
+  structuredData?: 'home' | 'none';
+}
+
+const {
+  title,
+  description,
+  path = '/',
+  ogImage = '/og-default.png',
+  structuredData = 'none',
+} = Astro.props;
+
+const canonical = new URL(path, site.url).href;
+const ogImageUrl = new URL(ogImage, site.url).href;
+/** 首页标题不重复品牌名。 */
+const fullTitle = path === '/' ? `${site.name} — ${site.tagline}` : `${title} — ${site.name}`;
+
+const softwareApplication = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: site.name,
+  description,
+  url: site.url,
+  applicationCategory: 'UtilitiesApplication',
+  operatingSystem: requirements.os,
+  processorRequirements: requirements.chip,
+  // 没有定价模型，因此不写 offers / price。
+};
+
+const organization = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: site.name,
+  url: site.url,
+  sameAs: [site.repo],
+};
+---
+
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{fullTitle}</title>
+<meta name="description" content={description} />
+<link rel="canonical" href={canonical} />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<meta name="theme-color" content="#FBF7F2" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#1D1816" media="(prefers-color-scheme: dark)" />
+
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content={site.name} />
+<meta property="og:title" content={fullTitle} />
+<meta property="og:description" content={description} />
+<meta property="og:url" content={canonical} />
+<meta property="og:image" content={ogImageUrl} />
+<meta property="og:locale" content="zh_CN" />
+
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content={fullTitle} />
+<meta name="twitter:description" content={description} />
+<meta name="twitter:image" content={ogImageUrl} />
+
+<link rel="sitemap" href="/sitemap-index.xml" />
+
+{
+  structuredData === 'home' && (
+    <>
+      <script
+        type="application/ld+json"
+        set:html={JSON.stringify(softwareApplication)}
+      />
+      <script type="application/ld+json" set:html={JSON.stringify(organization)} />
+    </>
+  )
+}

@@ -1,0 +1,21 @@
+---
+/**
+ * 统一最大内容宽度与横向 padding。Section 不自己定义这两个值。
+ */
+interface Props {
+  /** content 用于长文本阅读宽度，page 用于常规内容。 */
+  width?: 'page' | 'content';
+  class?: string;
+}
+
+const { width = 'page', class: className = '' } = Astro.props;
+
+const widths = {
+  page: 'max-w-(--container-page)',
+  content: 'max-w-(--container-content)',
+};
+---
+
+<div class={`mx-auto w-full px-6 sm:px-8 ${widths[width]} ${className}`}>
+  <slot />
+</div>

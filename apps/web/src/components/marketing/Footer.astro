@@ -1,0 +1,72 @@
+---
+/**
+ * Footer。文档链接、角色授权声明和真实仓库入口。
+ * 不放虚构的公司信息、社交账号或订阅表单。
+ */
+import Container from '~/components/ui/Container.astro';
+import { footer, requirements, site } from '~/content/site';
+import { frameUrl } from '~/lib/petFrames';
+
+const markUrl = frameUrl('retriever-yellow', 'idle', 0);
+---
+
+<footer class="border-t border-line bg-sidebar py-14">
+  <Container>
+    <div class="flex flex-col gap-10 md:flex-row md:justify-between">
+      <div class="max-w-xs">
+        <div class="flex items-center gap-2">
+          <img src={markUrl} alt="" width="28" height="28" data-pet-frame class="size-7" />
+          <span class="font-rounded text-lg font-black tracking-tight text-coral">{site.name}</span>
+        </div>
+        <p class="mt-3 text-sm leading-relaxed text-muted">{site.tagline}</p>
+        <p class="mt-2 text-xs text-faint">{requirements.os} · {requirements.chip}</p>
+      </div>
+
+      <nav aria-label="文档" class="md:min-w-[260px]">
+        <h2 class="text-xs font-semibold tracking-wide text-faint uppercase">文档</h2>
+        <ul class="mt-4 grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm">
+          {
+            footer.docs.map((item) => (
+              <li>
+                <a
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-track-docs={item.doc}
+                  class="rounded-sm text-muted transition-colors duration-200 hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus"
+                >
+                  {item.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </nav>
+    </div>
+
+    <div
+      class="mt-10 flex flex-col gap-3 border-t border-line pt-6 text-xs text-faint sm:flex-row sm:items-center sm:justify-between"
+    >
+      <p>
+        {footer.attribution.text}
+        <a
+          href={footer.attribution.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="rounded-sm underline decoration-line underline-offset-2 transition-colors duration-200 hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus"
+        >
+          Moonlab Studio
+        </a>
+      </p>
+      <a
+        href={site.repo}
+        target="_blank"
+        rel="noopener noreferrer"
+        data-track-github="footer"
+        class="rounded-sm transition-colors duration-200 hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus"
+      >
+        GitHub
+      </a>
+    </div>
+  </Container>
+</footer>

@@ -1,0 +1,105 @@
+---
+/**
+ * Navbar。移动端菜单用原生 <details>，不为一个展开动作引入 React。
+ */
+import { Github } from 'lucide-react';
+import Button from '~/components/ui/Button.astro';
+import Container from '~/components/ui/Container.astro';
+import { nav, site } from '~/content/site';
+import { frameUrl } from '~/lib/petFrames';
+
+/** 字标旁的图形直接用角色真实 idle 帧，不另画 logo。 */
+const markUrl = frameUrl('maltese-white', 'idle', 0);
+---
+
+<header
+  class="sticky top-0 z-40 border-b border-line/70 bg-canvas/85 backdrop-blur-sm"
+>
+  <Container>
+    <div class="flex h-16 items-center justify-between gap-6">
+      <a
+        href="/"
+        class="flex shrink-0 items-center gap-2 rounded-control focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+      >
+        <img src={markUrl} alt="" width="32" height="32" data-pet-frame class="size-8" />
+        <span class="font-rounded text-xl font-black tracking-tight text-coral">{site.name}</span>
+      </a>
+
+      <nav aria-label="主导航" class="hidden lg:block">
+        <ul class="flex items-center gap-7 text-sm text-muted">
+          {
+            nav.map((item) => (
+              <li>
+                <a
+                  href={item.href}
+                  class="rounded-sm transition-colors duration-200 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus"
+                >
+                  {item.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </nav>
+
+      <div class="flex items-center gap-2">
+        <a
+          href={site.repo}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="在 GitHub 上查看 Mino"
+          data-track-github="navbar"
+          class="hidden size-10 items-center justify-center rounded-control text-muted transition-colors duration-200 hover:bg-coral-soft hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus sm:inline-flex"
+        >
+          <Github size={18} aria-hidden="true" />
+        </a>
+        <Button href="#install" size="md" data-track-cta="navbar">安装</Button>
+
+        <details class="relative lg:hidden">
+          <summary
+            aria-label="展开导航"
+            class="flex size-10 cursor-pointer list-none items-center justify-center rounded-control text-muted transition-colors duration-200 hover:bg-coral-soft hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <path
+                d="M2 5h14M2 9h14M2 13h14"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"></path>
+            </svg>
+          </summary>
+          <nav
+            aria-label="移动端导航"
+            class="absolute right-0 z-50 mt-2 w-48 rounded-card border border-line bg-surface-raised p-2 shadow-raised"
+          >
+            <ul class="text-sm">
+              {
+                nav.map((item) => (
+                  <li>
+                    <a
+                      href={item.href}
+                      class="block rounded-control px-3 py-2 text-muted transition-colors duration-200 hover:bg-coral-soft hover:text-coral"
+                    >
+                      {item.label}
+                    </a>
+                  </li>
+                ))
+              }
+              <li>
+                <a
+                  href={site.repo}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-track-github="navbar-mobile"
+                  class="block rounded-control px-3 py-2 text-muted transition-colors duration-200 hover:bg-coral-soft hover:text-coral"
+                >
+                  GitHub
+                </a>
+              </li>
+            </ul>
+          </nav>
+        </details>
+      </div>
+    </div>
+  </Container>
+</header>

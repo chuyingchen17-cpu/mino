@@ -1,0 +1,24 @@
+---
+/**
+ * 状态标签。capsule 圆角，语义色 + 文字，不靠颜色单独表意。
+ */
+interface Props {
+  tone?: 'coral' | 'mint' | 'warning' | 'neutral';
+  class?: string;
+}
+
+const { tone = 'neutral', class: className = '' } = Astro.props;
+
+const tones = {
+  coral: 'bg-coral-soft text-coral',
+  mint: 'bg-mint-soft text-mint',
+  warning: 'bg-coral-soft text-warning',
+  neutral: 'bg-surface text-muted border border-line',
+};
+---
+
+<span
+  class={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${tones[tone]} ${className}`}
+>
+  <slot />
+</span>

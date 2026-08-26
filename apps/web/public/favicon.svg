@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Mino">
+  <!-- 珊瑚底 + 白色一体式软团轮廓，与角色造型协议一致：无独立圆头、无颈部、无分体四腿。 -->
+  <rect width="64" height="64" rx="16" fill="#E8545B" />
+  <g fill="#FFFEFA" stroke="#141414" stroke-width="2.4" stroke-linejoin="round">
+    <path d="M20 24c-1.5-5 0-8 2.5-8s4.5 2.5 5 5z" />
+    <path d="M44 24c1.5-5 0-8-2.5-8s-4.5 2.5-5 5z" />
+    <path
+      d="M32 17c9.5 0 16 7 16 16.5S41.5 50 32 50s-16-6-16-16.5S22.5 17 32 17z"
+    />
+  </g>
+  <g fill="#141414">
+    <circle cx="26" cy="32" r="2.2" />
+    <circle cx="38" cy="32" r="2.2" />
+  </g>
+  <path
+    d="M28.5 38q3.5 3 7 0"
+    fill="none"
+    stroke="#141414"
+    stroke-width="2.4"
+    stroke-linecap="round"
+  />
+</svg>

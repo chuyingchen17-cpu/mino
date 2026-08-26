@@ -1,0 +1,92 @@
+---
+/**
+ * 安装区。紧接首屏，因为「装上」就是用户的真实下一步。
+ *
+ * 诚实披露（未签名、需要 Control 单击、换构建要重新登录）直接展开显示，不折叠隐藏。
+ */
+import { CircleAlert } from 'lucide-react';
+import Section from '~/components/ui/Section.astro';
+import InstallCommand from '~/components/interactive/InstallCommand';
+import { install } from '~/content/site';
+---
+
+<Section id="install" tone="sidebar" eyebrow="安装" heading={install.heading} body={install.body}>
+  {/*
+    单列时也要显式写 minmax(0,...)：命令用 whitespace-pre 不换行，
+    auto 轨道会被它的 max-content 撑到比容器还宽，导致整页横向滚动。
+  */}
+  <div
+    class="mt-10 grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:gap-12"
+  >
+    <div class="min-w-0">
+      <InstallCommand
+        command={install.primary.command}
+        variant={install.primary.variant}
+        label={install.primary.label}
+        client:visible
+      />
+
+      <p class="mt-3 text-sm leading-relaxed text-muted">{install.primary.note}</p>
+
+      <div class="mt-6 space-y-3">
+        <details class="group rounded-card border border-line bg-surface">
+          <summary
+            class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-ink transition-colors duration-200 hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          >
+            {install.tag.label}
+          </summary>
+          <div class="border-t border-line p-3">
+            <InstallCommand
+              command={install.tag.command}
+              variant={install.tag.variant}
+              client:visible
+            />
+          </div>
+        </details>
+
+        <details class="group rounded-card border border-line bg-surface">
+          <summary
+            class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-ink transition-colors duration-200 hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          >
+            {install.source.label}
+          </summary>
+          <div class="space-y-3 border-t border-line p-3">
+            <InstallCommand
+              command={install.source.command}
+              variant={install.source.variant}
+              client:visible
+            />
+            <p class="px-1 text-sm text-muted">{install.source.note}</p>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    {/* 需要在装之前知道的事，不藏在 FAQ 里 */}
+    <aside class="rounded-card border border-line bg-surface p-6 shadow-card">
+      <h3 class="flex items-center gap-2 text-base font-semibold text-ink">
+        <CircleAlert size={17} class="text-warning" aria-hidden="true" />
+        装之前需要知道
+      </h3>
+      <ul class="mt-4 space-y-3">
+        {
+          install.disclosures.map((item) => (
+            <li class="flex gap-2.5 text-sm leading-relaxed text-muted">
+              <span class="mt-[7px] size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+              <span>{item}</span>
+            </li>
+          ))
+        }
+      </ul>
+      <a
+        href={install.nightlyReleaseUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        data-track-github="install-nightly"
+        class="mt-5 inline-block rounded-sm text-sm font-semibold text-coral transition-colors duration-200 hover:text-coral-pressed focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus"
+      >
+        查看 nightly 构建 →
+      </a>
+    </aside>
+  </div>
+</Section>
