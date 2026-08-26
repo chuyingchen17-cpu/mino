@@ -10,6 +10,10 @@ if (( ! $+commands[npm] )); then
     exit 2
 fi
 
+zsh -n "$project_dir/Scripts/install.sh"
+zsh -n "$project_dir/Scripts/install-app.sh"
+zsh -n "$project_dir/Scripts/build-app.sh"
+
 if [[ ! -d "$project_dir/Backend/node_modules" ]]; then
     npm --prefix "$project_dir/Backend" ci
 fi

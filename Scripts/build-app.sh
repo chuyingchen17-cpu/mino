@@ -25,7 +25,8 @@ if [[ "$configuration" == "release" \
     && -z "${MINO_CODE_SIGN_IDENTITY:-}" \
     && "${MINO_ALLOW_ADHOC_RELEASE:-0}" != "1" ]]; then
     echo "Release bundles require MINO_CODE_SIGN_IDENTITY for a stable Keychain identity." >&2
-    echo "CI-only validation may set MINO_ALLOW_ADHOC_RELEASE=1; do not distribute that artifact." >&2
+    echo "For a local unsigned install, use Scripts/install-app.sh --release." >&2
+    echo "CI bundle-structure checks may set MINO_ALLOW_ADHOC_RELEASE=1; do not distribute that artifact." >&2
     exit 2
 fi
 
@@ -110,10 +111,9 @@ if [[ -n "${MINO_CODE_SIGN_IDENTITY:-}" ]]; then
         --sign "$MINO_CODE_SIGN_IDENTITY" \
         "$staging_dir"
 else
-    if [[ "$configuration" == "debug" ]]; then
-        echo "Warning: ad-hoc Debug uses a build-scoped encrypted session store." >&2
-        echo "Set MINO_CODE_SIGN_IDENTITY to preserve the login session across rebuilds." >&2
-    fi
+    echo "Warning: ad-hoc signing uses a build-scoped encrypted session store." >&2
+    echo "Install with Scripts/install-app.sh if you do not have a Developer ID." >&2
+    echo "Set MINO_CODE_SIGN_IDENTITY to preserve the login session across rebuilds." >&2
     # SwiftPM only linker-signs the executable. Sign the assembled bundle so
     # macOS binds Info.plist and resources to the application identity too.
     codesign --force --sign - "$staging_dir"

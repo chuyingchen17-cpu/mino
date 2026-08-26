@@ -4,10 +4,16 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   backend:
@@ -39,7 +45,9 @@ jobs:
 
   build-and-test:
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -52,11 +60,53 @@ jobs:
         run: swift --version
       - name: Run tests
         run: Scripts/test.sh
-      - name: Build release app bundle
-        # CI validates the bundle shape only; this artifact is never distributed.
-        # Production and QA release builds must use a stable Developer ID identity.
-        run: MINO_BUILD_CONFIGURATION=release MINO_ALLOW_ADHOC_RELEASE=1 Scripts/build-app.sh
+      - name: Build unsigned release app bundle
+        env:
+          MINO_BUILD_CONFIGURATION: release
+          MINO_ALLOW_ADHOC_RELEASE: "1"
+          MINO_MARKETING_VERSION: "0.1.0"
+          MINO_BUILD_NUMBER: ${{ github.run_number }}
+        run: Scripts/build-app.sh
       - name: Validate bundle metadata
         run: |
           plutil -lint .build/Mino.app/Contents/Info.plist
           codesign --verify --deep --strict .build/Mino.app
+          codesign -dv --verbose=2 .build/Mino.app
+      - name: Package unsigned zip
+        run: |
+          Scripts/install-app.sh --skip-build --no-install --zip
+          shasum -a 256 .build/Mino-unsigned.zip \
+            | awk '{print $1 "  Mino-unsigned.zip"}' \
+            > .build/Mino-unsigned.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mino-unsigned-macos
+          path: |
+            .build/Mino-unsigned.zip
+            .build/Mino-unsigned.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish GitHub Release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          files=(.build/Mino-unsigned.zip .build/Mino-unsigned.zip.sha256)
+          notes="Ad-hoc unsigned macOS build from ${GITHUB_SHA:0:7}. Not Developer ID signed. Install: curl -fsSL https://raw.githubusercontent.com/liyown/mino/main/Scripts/install.sh | zsh"
+          if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+              --prerelease \
+              --title "Mino ${GITHUB_REF_NAME} (unsigned)" \
+              --notes "$notes"
+          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            if gh release view nightly >/dev/null 2>&1; then
+              gh release upload nightly "${files[@]}" --clobber
+              gh release edit nightly --notes "$notes"
+            else
+              gh release create nightly "${files[@]}" \
+                --prerelease \
+                --title "Mino unsigned nightly" \
+                --notes "$notes" \
+                --target "$GITHUB_SHA"
+            fi
+          fi

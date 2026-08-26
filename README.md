@@ -2,6 +2,24 @@
 
 Mino 是原生 macOS 个人桌宠社交 MVP。每个账号拥有一只可养成的桌宠；好友关系授权后，主人可以双向邀请串门、离线照顾来访宠物，并托付密封文字信。摸摸、投喂、陪玩、散步等标准互动完全由本地确定性引擎即时回应，不调用模型；服务端只负责身份、授权、养成事实、Visit、信件和事件同步。
 
+## 安装
+
+macOS 14+，Apple 芯片。无需 Apple 开发者账号：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/liyown/mino/main/Scripts/install.sh | zsh
+```
+
+脚本会下载 CI 发布的 [unsigned nightly](https://github.com/liyown/mino/releases/tag/nightly)，校验 SHA-256，装到 `~/Applications/Mino.app` 并启动。Mino 在菜单栏，没有 Dock 图标。这是 ad-hoc 包，不是 Developer ID 签名；同一份 app 再打开会保留登录，换一个构建需要重新登录。若系统提示无法验证开发者：按住 Control 单击 `~/Applications/Mino.app` → 打开。
+
+指定某个 tag：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/liyown/mino/main/Scripts/install.sh | MINO_INSTALL_RELEASE=v0.1.0 zsh
+```
+
+nightly 只在 `main` 的测试和 release 构建都通过后更新。若还没有 [GitHub Release](https://github.com/liyown/mino/releases)，用下面的源码安装。
+
 ## 本地运行
 
 要求：macOS 14+、Swift 6.2+、Node.js 20+。后端直接运行在本地 Cloudflare Workers Runtime，不需要 Docker 或 PostgreSQL。
@@ -36,14 +54,29 @@ Scripts/smoke-dual-client-api.sh
 Scripts/test.sh
 ```
 
-该命令运行 Swift 测试、Worker TypeScript 检查、Workers Runtime 中的 D1 / Durable Object 测试、OpenAPI 生成和 Wrangler dry-run。单独构建应用：
+该命令运行 Swift 测试、Worker TypeScript 检查、Workers Runtime 中的 D1 / Durable Object 测试、OpenAPI 生成和 Wrangler dry-run。
+
+## 从源码安装（无需开发者身份）
+
+本机已有仓库时，构建 ad-hoc 包并装到用户应用程序目录：
+
+```sh
+Scripts/install-app.sh --release --open
+```
+
+```sh
+Scripts/install-app.sh --zip           # 额外打出 .build/Mino-unsigned.zip
+```
+
+`--zip` 里带 `Install-Mino.command`。只拷贝 `Mino.app` 会丢掉安装脚本。这个包不能当作正式分发版本。
+
+单独产出 `.build/Mino.app`：
 
 ```sh
 Scripts/build-app.sh
 ```
 
-正式或 QA release 包必须使用稳定的 Developer ID 签名，以使用 Keychain
-并让登录状态安全地跨版本升级：
+若有稳定的 Developer ID，release 包可以改用 Keychain，让登录状态跨版本升级：
 
 ```sh
 MINO_BUILD_CONFIGURATION=release \
@@ -51,18 +84,7 @@ MINO_CODE_SIGN_IDENTITY="Developer ID Application: …" \
 Scripts/build-app.sh
 ```
 
-`MINO_ALLOW_ADHOC_RELEASE=1` 只供 CI 校验未分发的 bundle 结构使用。
-
-本机 Debug 包优先使用稳定的 Apple Development 身份：
-
-```sh
-MINO_CODE_SIGN_IDENTITY="Apple Development: …" Scripts/build-app.sh
-```
-
-如果 `codesign` 返回 `errSecInternalComponent`，需要先由本人解锁“登录”钥匙串或在
-Xcode 中允许该私钥用于签名；不要把锁屏密码写进脚本或环境变量。未能稳定签名时，
-构建脚本会生成 ad-hoc 包；该包使用按当前二进制隔离的 AES-GCM 本地会话存储，
-不会访问旧构建的 Keychain。相同 app 重开可复用登录，重新编译后需登录一次。
+本机 Debug 包也可以使用 Apple Development 身份。如果 `codesign` 返回 `errSecInternalComponent`，需要先由本人解锁“登录”钥匙串或在 Xcode 中允许该私钥用于签名；不要把锁屏密码写进脚本或环境变量。
 
 标准客户端（包括 Xcode / SwiftPM 直接运行）内置生产服务 `https://api.mino.pet`，用户界面不提供服务器地址、API 版本或超时设置。`MINO_API_BASE_URL` 等环境变量只用于本地双客户端和开发 smoke，不会成为产品设置。
 
