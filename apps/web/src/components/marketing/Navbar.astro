@@ -2,7 +2,7 @@
 /**
  * Navbar。移动端菜单用原生 <details>，不为一个展开动作引入 React。
  */
-import { Github } from 'lucide-react';
+import Icon from '~/components/ui/Icon.astro';
 import Button from '~/components/ui/Button.astro';
 import Container from '~/components/ui/Container.astro';
 import { nav, site } from '~/content/site';
@@ -51,7 +51,7 @@ const markUrl = frameUrl('maltese-white', 'idle', 0);
           data-track-github="navbar"
           class="hidden size-10 items-center justify-center rounded-control text-muted transition-colors duration-200 hover:bg-coral-soft hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus sm:inline-flex"
         >
-          <Github size={18} aria-hidden="true" />
+          <Icon name="github" size={18} />
         </a>
         <Button href="#install" size="md" data-track-cta="navbar">安装</Button>
 

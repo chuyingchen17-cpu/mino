@@ -3,7 +3,7 @@
  * Hero。结构固定为：Eyebrow → 产品定义 → 1~2 行说明 → 双 CTA → 产品视觉。
  * 不写抽象 slogan，第一屏就说清这是什么、归属于谁、下一步做什么。
  */
-import { Github } from 'lucide-react';
+import Icon from '~/components/ui/Icon.astro';
 import Button from '~/components/ui/Button.astro';
 import Container from '~/components/ui/Container.astro';
 import PetDesktopScene from './PetDesktopScene.astro';
@@ -38,7 +38,7 @@ import { hero, requirements } from '~/content/site';
             external
             data-track-github="hero"
           >
-            <Github size={16} aria-hidden="true" />
+            <Icon name="github" size={16} />
             {hero.secondaryCta.label}
           </Button>
         </div>

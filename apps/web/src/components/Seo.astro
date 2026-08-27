@@ -78,11 +78,17 @@ const organization = {
 {
   structuredData === 'home' && (
     <>
+      {/* 结构化数据不能被打包处理，必须原样留在 HTML 里给爬虫读。 */}
       <script
+        is:inline
         type="application/ld+json"
         set:html={JSON.stringify(softwareApplication)}
       />
-      <script type="application/ld+json" set:html={JSON.stringify(organization)} />
+      <script
+        is:inline
+        type="application/ld+json"
+        set:html={JSON.stringify(organization)}
+      />
     </>
   )
 }

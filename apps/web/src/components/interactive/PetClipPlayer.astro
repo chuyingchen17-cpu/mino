@@ -1,0 +1,179 @@
+---
+/**
+ * 逐帧播放器。原生实现，不 hydrate 任何框架。
+ *
+ * 帧率、帧数、循环与 Reduce Motion 静态帧全部来自 app 的 manifest
+ * （经 scripts/sync-pet-frames.mjs 生成），这里不重新定义。
+ *
+ * 所有帧在构建期就渲染成 stacked <img>，播放时只切 opacity：
+ * 换 src 会在解码期间闪一下白，切 opacity 不会。
+ * 前提是每一帧都得先下载好，所以后续帧也用 eager，只把
+ * fetchpriority 降到 low，避免和首屏 LCP 抢带宽。
+ */
+import { clipMeta, frameUrls, type CharacterId, type ClipId } from '~/lib/petFrames';
+
+interface Props {
+  character: CharacterId;
+  clip: ClipId;
+  size?: number;
+  /** auto 进入即播；hover / click 由用户触发，用于「摸摸有反应」这类演示。 */
+  trigger?: 'auto' | 'hover' | 'click';
+  /** 首屏 LCP 那一帧用 eager + sync 解码，让它尽早上屏。 */
+  eager?: boolean;
+  label?: string;
+  class?: string;
+}
+
+const {
+  character,
+  clip,
+  size = 160,
+  trigger = 'auto',
+  eager = false,
+  label,
+  class: className = '',
+} = Astro.props;
+
+const meta = clipMeta(character, clip);
+const urls = frameUrls(character, clip);
+const Tag = trigger === 'auto' ? 'div' : 'button';
+---
+
+<Tag
+  class:list={['relative shrink-0', trigger !== 'auto' && 'cursor-pointer', className]}
+  style={`width:${size}px;height:${size}px`}
+  data-pet-player
+  data-character={character}
+  data-clip={clip}
+  data-frames={meta.frameCount}
+  data-fps={meta.framesPerSecond}
+  data-loops={String(meta.loops)}
+  data-trigger={trigger}
+  data-reduce-frame={meta.reduceMotionFrameIndex}
+  {...trigger !== 'auto' ? { type: 'button', 'aria-label': label } : {}}
+>
+  {
+    urls.map((url, index) => (
+      <img
+        src={url}
+        alt={index === 0 ? (label ?? '') : ''}
+        aria-hidden={index === 0 ? undefined : 'true'}
+        width={size}
+        height={size}
+        data-pet-frame
+        data-frame-index={index}
+        loading="eager"
+        fetchpriority={index === 0 ? undefined : 'low'}
+        decoding={eager && index === 0 ? 'sync' : 'async'}
+        class="absolute inset-0 size-full"
+        style={`opacity:${index === 0 ? 1 : 0}`}
+      />
+    ))
+  }
+</Tag>
+
+<script>
+  import { track } from '~/lib/analytics';
+
+  /**
+   * 一个模块脚本驱动页面上所有播放器实例。
+   * Astro 会把它 hoist 并去重，组件用几次都只有一份代码。
+   */
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  document.querySelectorAll<HTMLElement>('[data-pet-player]').forEach((root) => {
+    const frames = Array.from(root.querySelectorAll<HTMLImageElement>('[data-frame-index]'));
+    const frameCount = Number(root.dataset.frames);
+    const interval = 1000 / Number(root.dataset.fps);
+    const loops = root.dataset.loops === 'true';
+    const trigger = root.dataset.trigger;
+    const reduceFrame = Number(root.dataset.reduceFrame);
+
+    let current = 0;
+    let rafId: number | null = null;
+    let last = 0;
+
+    const show = (index: number) => {
+      if (index === current) return;
+      frames[current]?.style.setProperty('opacity', '0');
+      frames[index]?.style.setProperty('opacity', '1');
+      current = index;
+    };
+
+    const stop = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = null;
+    };
+
+    const step = (now: number) => {
+      if (now - last >= interval) {
+        last = now;
+        const next = current + 1;
+        if (next >= frameCount) {
+          // 非循环 clip 停在最后一帧，不回弹到 0。
+          if (!loops) {
+            show(frameCount - 1);
+            stop();
+            return;
+          }
+          show(0);
+        } else {
+          show(next);
+        }
+      }
+      rafId = requestAnimationFrame(step);
+    };
+
+    const play = () => {
+      if (reduced.matches) {
+        show(reduceFrame);
+        return;
+      }
+      stop();
+      show(0);
+      // 用当前时间起算，否则 last=0 会让第一帧立刻被跳过。
+      last = performance.now();
+      rafId = requestAnimationFrame(step);
+    };
+
+    const applyReduced = () => {
+      if (reduced.matches) {
+        stop();
+        show(reduceFrame);
+      } else if (trigger === 'auto') {
+        play();
+      }
+    };
+
+    reduced.addEventListener('change', applyReduced);
+
+    if (reduced.matches) {
+      show(reduceFrame);
+      return;
+    }
+
+    if (trigger === 'auto') {
+      // 只在进入视口后才跑 rAF，页面滚过去的帧动画不该占 CPU。
+      const observer = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) play();
+          else stop();
+        }
+      });
+      observer.observe(root);
+      return;
+    }
+
+    const fire = () => {
+      track('demo_play', { character: root.dataset.character, clip: root.dataset.clip });
+      play();
+    };
+
+    if (trigger === 'hover') {
+      root.addEventListener('mouseenter', fire);
+      root.addEventListener('focus', fire);
+    } else {
+      root.addEventListener('click', fire);
+    }
+  });
+</script>

@@ -1,0 +1,108 @@
+---
+/**
+ * 安装命令的复制交互。原生实现，不 hydrate 任何框架。
+ *
+ * 三个状态的图标与文字都在构建期渲染好，运行时只切 data-state。
+ * 成功与失败都用「图标 + 文字」表达，不只靠颜色。
+ */
+import Icon from '~/components/ui/Icon.astro';
+
+interface Props {
+  command: string;
+  variant: 'nightly' | 'tag' | 'source';
+  label?: string;
+}
+
+const { command, variant, label } = Astro.props;
+---
+
+<div
+  class="min-w-0 rounded-card border border-line bg-surface-raised shadow-card"
+  data-copy-root
+  data-state="idle"
+>
+  {label && <p class="border-b border-line px-4 py-2 text-xs font-semibold text-faint">{label}</p>}
+  <div class="flex items-center gap-3 p-3 sm:p-4">
+    <code
+      class="min-w-0 flex-1 overflow-x-auto font-mono text-[13px] leading-relaxed whitespace-pre text-ink"
+      data-copy-source>{command}</code
+    >
+    <button
+      type="button"
+      aria-label={`复制命令：${command}`}
+      data-copy-button
+      data-variant={variant}
+      class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-control border border-line bg-surface px-3 text-xs font-semibold text-ink transition-colors duration-200 hover:bg-coral-soft hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+    >
+      <span class="items-center gap-1.5" data-state-view="idle">
+        <Icon name="copy" size={15} />
+        复制
+      </span>
+      <span class="items-center gap-1.5 text-mint" data-state-view="copied">
+        <Icon name="check" size={15} />
+        已复制
+      </span>
+      <span class="items-center gap-1.5 text-coral" data-state-view="failed">
+        <Icon name="x" size={15} />
+        复制失败
+      </span>
+    </button>
+  </div>
+  {/* 复制结果同时播报给读屏软件。 */}
+  <p role="status" aria-live="polite" class="sr-only" data-copy-status></p>
+</div>
+
+<style>
+  [data-state-view] {
+    display: none;
+  }
+  [data-copy-root][data-state='idle'] [data-state-view='idle'],
+  [data-copy-root][data-state='copied'] [data-state-view='copied'],
+  [data-copy-root][data-state='failed'] [data-state-view='failed'] {
+    display: inline-flex;
+  }
+</style>
+
+<script>
+  import { track } from '~/lib/analytics';
+
+  const MESSAGES = {
+    copied: '命令已复制到剪贴板',
+    failed: '复制失败，请手动选中命令',
+  };
+
+  document.querySelectorAll<HTMLElement>('[data-copy-root]').forEach((root) => {
+    const button = root.querySelector<HTMLButtonElement>('[data-copy-button]');
+    const source = root.querySelector<HTMLElement>('[data-copy-source]');
+    const status = root.querySelector<HTMLElement>('[data-copy-status]');
+    if (!button || !source) return;
+
+    let timer: number | undefined;
+
+    const setState = (state: 'idle' | 'copied' | 'failed') => {
+      root.dataset.state = state;
+      if (status) status.textContent = state === 'idle' ? '' : MESSAGES[state];
+      window.clearTimeout(timer);
+      // 2.4s 对齐 App 里气泡的停留时长。
+      if (state !== 'idle') timer = window.setTimeout(() => setState('idle'), 2400);
+    };
+
+    button.addEventListener('click', async () => {
+      const command = source.textContent ?? '';
+      try {
+        await navigator.clipboard.writeText(command);
+        setState('copied');
+        track('install_command_copy', { variant: button.dataset.variant });
+      } catch {
+        // 非 HTTPS、失焦或用户拒绝授权时会走到这里。
+        // 直接把命令选中，用户按 Cmd+C 就能接着复制。
+        setState('failed');
+        const range = document.createRange();
+        range.selectNodeContents(source);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+    });
+  });
+</script>

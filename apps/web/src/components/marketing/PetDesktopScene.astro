@@ -10,17 +10,18 @@
  *
  * 待 App 出真实截图后，这里应替换为截图。
  */
-import { Cookie, Ellipsis, Footprints, Volleyball } from 'lucide-react';
-import PetClipPlayer from '~/components/interactive/PetClipPlayer';
+import Icon from '~/components/ui/Icon.astro';
+import { type IconName } from '~/components/ui/icons';
+import PetClipPlayer from '~/components/interactive/PetClipPlayer.astro';
 import { frameUrl } from '~/lib/petFrames';
 
 const menuBarMark = frameUrl('maltese-white', 'idle', 0);
 
-const actions = [
-  { label: '投喂', Icon: Cookie },
-  { label: '陪玩', Icon: Volleyball },
-  { label: '散步', Icon: Footprints },
-  { label: '更多', Icon: Ellipsis },
+const actions: { label: string; icon: IconName }[] = [
+  { label: '投喂', icon: 'cookie' },
+  { label: '陪玩', icon: 'volleyball' },
+  { label: '散步', icon: 'footprints' },
+  { label: '更多', icon: 'ellipsis' },
 ];
 ---
 
@@ -52,9 +53,9 @@ const actions = [
       class="flex h-[42px] w-[252px] items-center justify-around rounded-[14px] border border-line bg-surface-raised px-1 shadow-card"
     >
       {
-        actions.map(({ label, Icon }) => (
+        actions.map(({ label, icon }) => (
           <span class="flex items-center gap-1.5 px-2 text-[11px] font-semibold text-muted">
-            <Icon size={14} aria-hidden="true" />
+            <Icon name={icon} size={14} />
             {label}
           </span>
         ))
@@ -69,7 +70,6 @@ const actions = [
         size={200}
         eager={true}
         label="Mino 的白色马尔济斯"
-        client:load
       />
       <span
         class="mt-[-18px] h-2 w-20 rounded-full bg-ink/8 blur-[2px]"
