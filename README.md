@@ -28,6 +28,12 @@ curl -fsSL https://raw.githubusercontent.com/chuyingchen17-cpu/mino/main/Scripts
 
 nightly 只在 `main` 的测试和 release 都通过后更新。仓库还没有 [Release](https://github.com/chuyingchen17-cpu/mino/releases) 时，用下面的源码安装。
 
+## 产品网站
+
+产品对外展示页：[https://mino.pet](https://mino.pet)
+
+源码在 `apps/web/`，Astro + Tailwind CSS 构建，部署在 Cloudflare Pages。
+
 ## 从源码安装
 
 本地已经有仓库的话：
