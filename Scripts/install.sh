@@ -4,9 +4,9 @@ set -euo pipefail
 
 # One-click installer for the unsigned nightly macOS build published by CI.
 # Designed to be piped:
-#   curl -fsSL https://raw.githubusercontent.com/liyown/mino/main/Scripts/install.sh | zsh
+#   curl -fsSL https://raw.githubusercontent.com/chuyingchen17-cpu/mino/main/Scripts/install.sh | zsh
 
-MINO_REPO="${MINO_INSTALL_REPO:-liyown/mino}"
+MINO_REPO="${MINO_INSTALL_REPO:-chuyingchen17-cpu/mino}"
 MINO_RELEASE="${MINO_INSTALL_RELEASE:-nightly}"
 MINO_ASSET="${MINO_INSTALL_ASSET:-Mino-unsigned.zip}"
 destination="${HOME}/Applications/Mino.app"
@@ -17,12 +17,12 @@ usage() {
     cat <<'EOF'
 Install the unsigned Mino macOS app from GitHub Releases.
 
-  curl -fsSL https://raw.githubusercontent.com/liyown/mino/main/Scripts/install.sh | zsh
+  curl -fsSL https://raw.githubusercontent.com/chuyingchen17-cpu/mino/main/Scripts/install.sh | zsh
   Scripts/install.sh --zip .build/Mino-unsigned.zip
   curl ... | zsh -s -- --no-open
 
 Environment:
-  MINO_INSTALL_REPO      GitHub owner/name (default liyown/mino)
+  MINO_INSTALL_REPO      GitHub owner/name (default chuyingchen17-cpu/mino)
   MINO_INSTALL_RELEASE   Release tag (default nightly)
 EOF
 }
