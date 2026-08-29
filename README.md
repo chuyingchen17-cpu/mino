@@ -13,26 +13,28 @@
 macOS 14+，Apple 芯片。不需要开发者账号：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/liyown/mino/main/Scripts/install.sh | zsh
+curl -fsSL https://raw.githubusercontent.com/chuyingchen17-cpu/mino/main/Scripts/install.sh | zsh
 ```
 
-脚本会下载 CI 的 [unsigned nightly](https://github.com/liyown/mino/releases/tag/nightly)，校验 SHA-256，装到 `~/Applications/Mino.app` 并启动。这是 ad-hoc 包，不是 Developer ID 签名。同一份 app 再打开会保留登录；换一个构建需要重新登录。
+脚本会下载 CI 的 [unsigned nightly](https://github.com/chuyingchen17-cpu/mino/releases/tag/nightly)，校验 SHA-256，装到 `~/Applications/Mino.app` 并启动。这是 ad-hoc 包，不是 Developer ID 签名。同一份 app 再打开会保留登录；换一个构建需要重新登录。
 
 如果系统提示无法验证开发者，按住 Control 单击 `~/Applications/Mino.app`，再选打开。
 
 指定某个正式 tag：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/liyown/mino/main/Scripts/install.sh | MINO_INSTALL_RELEASE=v0.1.0 zsh
+curl -fsSL https://raw.githubusercontent.com/chuyingchen17-cpu/mino/main/Scripts/install.sh | MINO_INSTALL_RELEASE=v0.1.0 zsh
 ```
 
-nightly 只在 `main` 的测试和 release 都通过后更新。仓库还没有 [Release](https://github.com/liyown/mino/releases) 时，用下面的源码安装。
+nightly 只在 `main` 的测试和 release 都通过后更新。仓库还没有 [Release](https://github.com/chuyingchen17-cpu/mino/releases) 时，用下面的源码安装。
 
 ## 从源码安装
 
 本地已经有仓库的话：
 
 ```sh
+git clone https://github.com/chuyingchen17-cpu/mino.git
+cd mino
 Scripts/install-app.sh --release --open
 ```
 
@@ -55,6 +57,8 @@ Scripts/build-app.sh
 macOS 14+、Swift 6.2+、Node.js 20+。后端跑在本机的 Cloudflare Workers Runtime，不需要 Docker 或 PostgreSQL。
 
 ```sh
+git clone https://github.com/chuyingchen17-cpu/mino.git
+cd mino
 cp apps/worker/.env.example apps/worker/.dev.vars
 npm --prefix apps/worker ci
 npm --prefix apps/worker run db:migrate:local
@@ -82,7 +86,7 @@ mise //apps/worker:dev
 
 ## 工作方式
 
-```text
+```
 macOS 客户端 ── HTTPS / WSS ── Cloudflare Worker
   本地动画与回应                 身份、好友、养成、串门
   持久 outbox                    D1 保存事实
@@ -91,7 +95,7 @@ macOS 客户端 ── HTTPS / WSS ── Cloudflare Worker
 
 客户端始终用事件游标和 bootstrap 对账，不把 WebSocket 当成事实来源。协议见 [`apps/worker/openapi.yaml`](apps/worker/openapi.yaml)。
 
-```text
+```
 apps/macos/     Swift 客户端
 apps/worker/    Cloudflare Worker
 Scripts/        构建、测试、安装
