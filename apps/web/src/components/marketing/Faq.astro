@@ -1,0 +1,56 @@
+---
+/**
+ * 常见问题。
+ *
+ * 这里收的是原来各占一个整区块的三件事：还没做的功能、无障碍承诺、技术栈。
+ * 它们都必须能被查到，但都不值得在访客还在决定要不要装的时候占掉一屏。
+ *
+ * 折叠用原生 <details>，不为展开这一个动作引入 JS。
+ *
+ * tone 是 sidebar 而不是 canvas：见 Privacy.astro 里的说明，这三块的底色是一起排的。
+ */
+import Icon from '~/components/ui/Icon.astro';
+import Section from '~/components/ui/Section.astro';
+import { faq } from '~/content/site';
+---
+
+<Section id="faq" tone="sidebar" eyebrow="常见问题" heading={faq.heading}>
+  {/* 问答是纯文本，跟着正文宽度走，不要拉满整个容器 */}
+  <ul class="mt-8 max-w-3xl space-y-3">
+    {
+      faq.items.map((item) => (
+        <li>
+          <details class="group rounded-card border border-line bg-surface shadow-card">
+            <summary
+              class="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-left text-[15px] font-semibold text-ink transition-colors duration-200 hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+            >
+              {item.q}
+              <Icon
+                name="chevron-down"
+                size={16}
+                class="shrink-0 text-faint transition-transform duration-200 group-open:rotate-180"
+              />
+            </summary>
+
+            <div class="px-5 pb-5">
+              <p class="text-sm leading-relaxed text-muted">{item.a}</p>
+
+              {
+                'list' in item && (
+                  <ul class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {item.list.map((entry) => (
+                      <li class="flex items-center gap-2 rounded-control border border-line bg-canvas px-3 py-2 text-[13px] text-muted">
+                        <Icon name="x" size={14} class="shrink-0 text-faint" />
+                        <span>{entry}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              }
+            </div>
+          </details>
+        </li>
+      ))
+    }
+  </ul>
+</Section>

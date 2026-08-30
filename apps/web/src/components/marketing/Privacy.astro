@@ -1,0 +1,55 @@
+---
+/**
+ * 隐私区。
+ *
+ * 原来这件事被拆在三个区块里说（本地反馈讲云端只存事实、密封信讲不进日志、
+ * 工作方式讲不上传屏幕坐标）。访客关心的其实是同一个问题，所以合成一块答完。
+ *
+ * 「密封」需要看得见：右边那张卡把正文位置留出来但不显示内容，
+ * 表达日志和模型上下文里拿到的就是这个样子。
+ * caveat 用醒目的框，不能缩成小字——这是「不是端到端加密」的诚实披露。
+ *
+ * tone 用 sidebar（页面最深的底色）而不是默认的 canvas：上一块「它不会做的事」
+ * 是全页最亮的 surface，canvas 和 surface 只差 4 级灰度，两块贴在一起看不出分界。
+ * 让最亮的那一块前后都是 sidebar，明暗关系才拉得开，也不必为此加一条页面上
+ * 原本不存在的分隔线。改这里要连带看 Install（改成 canvas）和 Faq（改成 sidebar），
+ * 三块是一起排的，单独改一块会让交替链再次出现两块同色相邻。
+ */
+import Icon from '~/components/ui/Icon.astro';
+import Section from '~/components/ui/Section.astro';
+import { privacy } from '~/content/site';
+---
+
+<Section id="privacy" tone="sidebar" eyebrow="隐私" heading={privacy.heading} body={privacy.body}>
+  <div class="mt-10 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)] lg:gap-12">
+    <ul class="space-y-3">
+      {
+        privacy.boundaries.map((item) => (
+          <li class="flex gap-3 rounded-card border border-line bg-surface p-4 text-sm leading-relaxed text-ink shadow-card">
+            <Icon name="check" size={17} class="mt-0.5 text-mint" />
+            <span>{item}</span>
+          </li>
+        ))
+      }
+    </ul>
+
+    <aside class="rounded-card border border-line bg-surface p-6 shadow-card">
+      <h3 class="text-base font-semibold text-ink">{privacy.sealedTitle}</h3>
+      <div class="mt-5 rounded-[14px] border border-dashed border-line bg-canvas p-5">
+        <p class="text-[13px] font-semibold text-faint">{privacy.sealedLabel}</p>
+        {/* 三条灰条代表被遮住的正文，纯装饰，不该被读屏念出来 */}
+        <div class="mt-4 space-y-2" aria-hidden="true">
+          <span class="block h-2.5 w-full rounded-full bg-line" />
+          <span class="block h-2.5 w-4/5 rounded-full bg-line" />
+          <span class="block h-2.5 w-3/5 rounded-full bg-line" />
+        </div>
+        <p class="mt-4 text-[13px] font-semibold text-muted">{privacy.sealedNote}</p>
+      </div>
+
+      <div class="mt-5 flex gap-2.5 rounded-card bg-coral-soft p-4">
+        <Icon name="circle-alert" size={17} class="mt-0.5 text-warning" />
+        <p class="text-[13px] leading-relaxed text-ink">{privacy.caveat}</p>
+      </div>
+    </aside>
+  </div>
+</Section>

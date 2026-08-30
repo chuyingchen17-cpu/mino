@@ -16,6 +16,8 @@ export type IconName =
   | 'circle-alert'
   | 'copy'
   | 'check'
+  | 'chevron-down'
+  | 'ban'
   | 'x';
 
 export const ICON_NODES: Record<IconName, string> = {
@@ -33,5 +35,7 @@ export const ICON_NODES: Record<IconName, string> = {
     '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
   copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+  ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
 };

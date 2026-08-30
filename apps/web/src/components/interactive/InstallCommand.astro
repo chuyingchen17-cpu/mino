@@ -22,9 +22,14 @@ const { command, variant, label } = Astro.props;
   data-state="idle"
 >
   {label && <p class="border-b border-line px-4 py-2 text-xs font-semibold text-faint">{label}</p>}
-  <div class="flex items-center gap-3 p-3 sm:p-4">
+  <div class="flex items-start gap-3 p-3 sm:p-4">
+    {/*
+      命令必须完整可见：这是要粘进终端管给 zsh 的东西，看不到全文就不应该让人执行。
+      所以改成换行而不是横向滚动——anywhere 先在空格处断，只有长 URL 放不下才从词内断开；
+      同时它也消除了原来 whitespace-pre 把 max-content 轨道撑宽、弄出整页横向滚动的风险。
+    */}
     <code
-      class="min-w-0 flex-1 overflow-x-auto font-mono text-[13px] leading-relaxed whitespace-pre text-ink"
+      class="min-w-0 flex-1 font-mono text-[13px] leading-relaxed whitespace-pre-wrap text-ink [overflow-wrap:anywhere]"
       data-copy-source>{command}</code
     >
     <button

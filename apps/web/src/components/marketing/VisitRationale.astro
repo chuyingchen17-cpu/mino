@@ -1,0 +1,32 @@
+---
+/**
+ * 串门（第三块）：为什么这样设计。
+ *
+ * 这一块不新增任何功能断言，只把前两块已经证实的机制翻译成体验上的理由：
+ * 邀请等得起、互动存得住、信要等宠物走完一趟才送达——
+ * 在实现上这些是约束，在使用上它们才是这个功能想要的东西。
+ *
+ * 因此不配图也不配数据面板：四条并列的判断句，读完就走。
+ */
+import Section from '~/components/ui/Section.astro';
+import { visitRationale } from '~/content/site';
+---
+
+<Section
+  id="visit-why"
+  tone="sidebar"
+  eyebrow="串门 · 为什么"
+  heading={visitRationale.heading}
+  body={visitRationale.body}
+>
+  <ul class="mt-8 grid gap-4 sm:grid-cols-2">
+    {
+      visitRationale.reasons.map((reason) => (
+        <li class="rounded-card border border-line bg-surface p-5 shadow-card">
+          <h3 class="text-base font-semibold text-ink">{reason.label}</h3>
+          <p class="mt-1.5 text-sm leading-relaxed text-muted">{reason.detail}</p>
+        </li>
+      ))
+    }
+  </ul>
+</Section>

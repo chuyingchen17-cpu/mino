@@ -1,0 +1,56 @@
+---
+/**
+ * 串门（第二块）：信。
+ *
+ * 方向必须写对——只有被访问的一方能写信，收件人是来访宠物的主人，
+ * 送达时间是这次串门结束的那一刻。依据写在 content/site.ts 的注释里。
+ *
+ * 四步排成一条横向流程，因为「写下 → 交给客人 → 它回到家 → 对方才能读」
+ * 的顺序本身就是这个功能的全部要点；打乱成卡片网格会丢掉先后关系。
+ * 这一屏不放静帧：整页首屏已经有大量宠物帧，这里用文字讲清顺序更省。
+ */
+import Section from '~/components/ui/Section.astro';
+import { letters } from '~/content/site';
+---
+
+<Section
+  id="letters"
+  tone="canvas"
+  eyebrow="串门 · 信"
+  heading={letters.heading}
+  body={letters.body}
+>
+  <div class="mt-8 rounded-card border border-line bg-surface p-6 shadow-card">
+    <h3 class="text-base font-semibold text-ink">{letters.stepsTitle}</h3>
+    <ol class="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      {
+        letters.steps.map((step, index) => (
+          <li>
+            <span
+              class="flex size-7 items-center justify-center rounded-full bg-coral-soft text-[13px] font-semibold text-coral tabular-nums"
+              aria-hidden="true"
+            >
+              {index + 1}
+            </span>
+            <h4 class="mt-3 text-sm font-semibold text-ink">{step.label}</h4>
+            <p class="mt-1.5 text-sm leading-relaxed text-muted">{step.detail}</p>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+
+  <div class="mt-6 rounded-card border border-line bg-surface p-6 shadow-card">
+    <h3 class="text-base font-semibold text-ink">{letters.guaranteesTitle}</h3>
+    <ul class="mt-4 grid gap-x-10 gap-y-3 lg:grid-cols-3">
+      {
+        letters.guarantees.map((item) => (
+          <li class="flex gap-2.5 text-sm leading-relaxed text-muted">
+            <span class="mt-[7px] size-1.5 shrink-0 rounded-full bg-coral" aria-hidden="true" />
+            <span>{item}</span>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</Section>

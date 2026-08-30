@@ -1,6 +1,6 @@
 ---
 /**
- * Footer。文档链接、角色授权声明和真实仓库入口。
+ * Footer。页面内导航、角色授权声明和真实仓库入口。
  * 不放虚构的公司信息、社交账号或订阅表单。
  */
 import Container from '~/components/ui/Container.astro';
@@ -22,17 +22,14 @@ const markUrl = frameUrl('retriever-yellow', 'idle', 0);
         <p class="mt-2 text-xs text-faint">{requirements.os} · {requirements.chip}</p>
       </div>
 
-      <nav aria-label="文档" class="md:min-w-[260px]">
-        <h2 class="text-xs font-semibold tracking-wide text-faint uppercase">文档</h2>
+      <nav aria-label="页面内导航" class="md:min-w-[260px]">
+        <h2 class="text-xs font-semibold tracking-wide text-faint uppercase">页面内导航</h2>
         <ul class="mt-4 grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm">
           {
-            footer.docs.map((item) => (
+            footer.sections.map((item) => (
               <li>
                 <a
                   href={item.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  data-track-docs={item.doc}
                   class="rounded-sm text-muted transition-colors duration-200 hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus"
                 >
                   {item.label}

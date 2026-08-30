@@ -2,13 +2,29 @@
 /**
  * 首页。
  *
- * 当前只实现 Hero + 安装区（方向 2 的第一版），其余 Section 按 README 的蓝图依次补齐。
+ * 区块顺序按访客的决策过程排：先看它是什么、看它当场动起来、挑一只、
+ * 知道怎么养，然后是串门——这是产品的核心，占连续三块：一次往来怎么发生、
+ * 信怎么送到、为什么要绕这一圈。之后再确认它不会烦你也不会偷看你、
+ * 数据不会被传走，最后才是装。
+ * 安装区原来排在第二位，等于用一串终端命令和三条「未签名」警告拦住刚进来的人；
+ * 想立刻装的人从 Hero 主按钮一键就到，不需要把它顶到前面。
+ *
  * 页面自身不写文案，全部来自 src/content/site.ts。
  */
 import BaseLayout from '~/layouts/BaseLayout.astro';
 import Navbar from '~/components/marketing/Navbar.astro';
 import Hero from '~/components/marketing/Hero.astro';
+import Demo from '~/components/marketing/Demo.astro';
+import Characters from '~/components/marketing/Characters.astro';
+import Growth from '~/components/marketing/Growth.astro';
+import Visit from '~/components/marketing/Visit.astro';
+import Letters from '~/components/marketing/Letters.astro';
+import VisitRationale from '~/components/marketing/VisitRationale.astro';
+import NotDoing from '~/components/marketing/NotDoing.astro';
+import Privacy from '~/components/marketing/Privacy.astro';
 import Install from '~/components/marketing/Install.astro';
+import Faq from '~/components/marketing/Faq.astro';
+import FinalCta from '~/components/marketing/FinalCta.astro';
 import Footer from '~/components/marketing/Footer.astro';
 import { site } from '~/content/site';
 import { frameUrl } from '~/lib/petFrames';
@@ -24,7 +40,17 @@ import { frameUrl } from '~/lib/petFrames';
   <Navbar />
   <main id="main">
     <Hero />
+    <Demo />
+    <Characters />
+    <Growth />
+    <Visit />
+    <Letters />
+    <VisitRationale />
+    <NotDoing />
+    <Privacy />
     <Install />
+    <Faq />
+    <FinalCta />
   </main>
   <Footer />
 </BaseLayout>

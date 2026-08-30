@@ -11,7 +11,6 @@ export type MinoEvent =
   | 'cta_click'
   | 'install_command_copy'
   | 'github_click'
-  | 'docs_click'
   | 'demo_play'
   | 'character_view';
 

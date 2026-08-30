@@ -1,0 +1,109 @@
+---
+/**
+ * 养成区。
+ *
+ * 这一段的重点是「不对称」：同一只宠物，自己看到精确数值，好友只看到三档文字。
+ * 所以两个面板必须并排放，让人一眼看出差别，而不是分两段话讲。
+ * 右侧的三档文字由左侧示例数值折算，两边不会互相矛盾。
+ */
+import Badge from '~/components/ui/Badge.astro';
+import Section from '~/components/ui/Section.astro';
+import { growth } from '~/content/site';
+
+const barTones: Record<string, string> = {
+  coral: 'bg-coral',
+  warning: 'bg-warning',
+  mint: 'bg-mint',
+};
+---
+
+<Section id="growth" eyebrow="养成" heading={growth.heading} body={growth.body}>
+  <div class="mt-10 grid gap-6 lg:grid-cols-2">
+    {/* 自己：四项精确数值 + 进度条 */}
+    <div class="rounded-card border border-line bg-surface p-6 shadow-card">
+      <div class="flex items-center justify-between gap-3">
+        <h3 class="text-base font-semibold text-ink">{growth.ownTitle}</h3>
+        <Badge tone="coral">仅你可见</Badge>
+      </div>
+
+      <dl class="mt-6 space-y-4">
+        {
+          growth.own.map((metric) => (
+            <div>
+              <div class="flex items-baseline justify-between gap-3">
+                <dt class="text-sm text-muted">{metric.label}</dt>
+                <dd class="font-mono text-sm font-semibold text-ink tabular-nums">
+                  {metric.value}
+                </dd>
+              </div>
+              <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-canvas">
+                <div
+                  class={`h-full rounded-full ${barTones[metric.tone]}`}
+                  style={`width:${metric.value}%`}
+                />
+              </div>
+            </div>
+          ))
+        }
+      </dl>
+    </div>
+
+    {/* 好友：只有三档文字，亲密不在公开摘要里 */}
+    <div class="rounded-card border border-line bg-surface p-6 shadow-card">
+      <div class="flex items-center justify-between gap-3">
+        <h3 class="text-base font-semibold text-ink">{growth.friendTitle}</h3>
+        <Badge tone="neutral">不含进度条与数值</Badge>
+      </div>
+
+      <dl class="mt-6 space-y-3">
+        {
+          growth.publicBands.map((item) => (
+            <div class="flex items-center justify-between gap-3 border-b border-line pb-3 last:border-0 last:pb-0">
+              <dt class="text-sm text-muted">{item.label}</dt>
+              <dd class="text-sm font-semibold text-ink">{item.text}</dd>
+            </div>
+          ))
+        }
+        <div class="flex items-center justify-between gap-3 pt-1">
+          <dt class="text-sm text-faint line-through">{growth.hidden.label}</dt>
+          <dd class="text-sm text-faint">{growth.hidden.note}</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+
+  <div class="mt-6 grid gap-6 lg:grid-cols-2">
+    {/* 亲密度阶梯：好友能看到的粗粒度层级 */}
+    <div class="rounded-card border border-line bg-surface p-6 shadow-card">
+      <h3 class="text-base font-semibold text-ink">{growth.familiarityTitle}</h3>
+      <ol class="mt-5 flex flex-wrap items-center gap-x-1.5 gap-y-2">
+        {
+          growth.familiarity.map((tier, index) => (
+            <li class="flex items-center gap-1.5">
+              {/* 连接符放在 li 内部：ol 下面只能是 li，插一个装饰元素会弄坏列表语义。 */}
+              {index > 0 && <span class="text-faint" aria-hidden="true">→</span>}
+              <span class="rounded-full border border-line bg-canvas px-3 py-1 text-xs font-semibold text-muted">
+                {tier}
+              </span>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+
+    {/* 同步状态：五个状态都是明确文字，不靠颜色单独表意 */}
+    <div class="rounded-card border border-line bg-surface p-6 shadow-card">
+      <h3 class="text-base font-semibold text-ink">{growth.syncTitle}</h3>
+      <ul class="mt-5 flex flex-wrap gap-2">
+        {
+          growth.syncStates.map((state) => (
+            <li>
+              <Badge tone={state.tone}>{state.label}</Badge>
+            </li>
+          ))
+        }
+      </ul>
+      <p class="mt-4 text-[13px] leading-relaxed text-muted">{growth.syncNote}</p>
+    </div>
+  </div>
+</Section>

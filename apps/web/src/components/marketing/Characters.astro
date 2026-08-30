@@ -1,0 +1,66 @@
+---
+/**
+ * 角色区。两只角色都用真实 idle 帧展示，不放渲染图或概念稿。
+ *
+ * 「选定后不能更换」写在选择旁边，而不是等用户注册完才发现。
+ */
+import Badge from '~/components/ui/Badge.astro';
+import Section from '~/components/ui/Section.astro';
+import PetClipPlayer from '~/components/interactive/PetClipPlayer.astro';
+import { characters } from '~/content/site';
+---
+
+<Section
+  id="characters"
+  tone="sidebar"
+  eyebrow="角色"
+  heading={characters.heading}
+  body={characters.body}
+>
+  <div class="mt-6">
+    <Badge tone="warning">{characters.constraint}</Badge>
+  </div>
+
+  <ul class="mt-8 grid gap-6 sm:grid-cols-2">
+    {
+      characters.items.map((item) => (
+        <li class="flex flex-col items-center rounded-card border border-line bg-surface p-6 text-center shadow-card">
+          <PetClipPlayer
+            character={item.id}
+            clip="idle"
+            size={168}
+            preload={false}
+            label={item.name}
+          />
+          {/* 影子是稳定的兄弟元素，不烘焙进帧，脚底线才固定得住。 */}
+          <span class="mt-[-14px] h-2 w-20 rounded-full bg-ink/8 blur-[2px]" aria-hidden="true" />
+          <h3 class="mt-4 font-rounded text-lg font-bold text-ink">{item.name}</h3>
+          <p class="mt-2 text-sm leading-relaxed text-muted">{item.detail}</p>
+        </li>
+      ))
+    }
+  </ul>
+
+  {/* 动作用中文名列出来。原来铺的是 clip 的英文 id，那是资产清单，访客看不出这是什么。 */}
+  <div class="mt-8 rounded-card border border-line bg-surface p-6 shadow-card">
+    <h3 class="text-base font-semibold text-ink">
+      两只角色各实现 {characters.actionCount} 个动作
+    </h3>
+    <dl class="mt-5 grid gap-5 sm:grid-cols-2">
+      {
+        characters.actionGroups.map((group) => (
+          <div>
+            <dt class="text-xs font-semibold tracking-wide text-faint uppercase">{group.label}</dt>
+            <dd class="mt-2 flex flex-wrap gap-1.5">
+              {group.actions.map((action) => (
+                <span class="rounded-full border border-line bg-canvas px-2.5 py-1 text-xs text-muted">
+                  {action}
+                </span>
+              ))}
+            </dd>
+          </div>
+        ))
+      }
+    </dl>
+  </div>
+</Section>

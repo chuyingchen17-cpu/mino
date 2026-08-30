@@ -1,0 +1,122 @@
+---
+/**
+ * 串门（第一块）：一次串门如何发生。
+ *
+ * 这是产品最核心的功能，因此拆成连续三块：
+ *   Visit（机制与互动）→ Letters（信）→ VisitRationale（为什么这样设计）
+ * 三块共用「串门 · X」的 eyebrow 把它们绑成一章，不另造分隔线之类的新视觉语言。
+ *
+ * 两处刻意的信息设计：
+ * 1. 编排铺成五格静帧。这个功能最难用文字说清的就是「宠物会自己走完一趟」，
+ *    图比句子省力。静帧用 manifest 指定的那一帧，不为五个格子去跑五个播放器。
+ * 2. 互动分两组渲染，而不是平铺成一排同色标签。
+ *    「哪些事只有客人在场才能做」正是串门的价值所在，同色平铺会把这层区别抹掉：
+ *    通用四项用 neutral，客人独有三项用 coral 并各带一句说明。
+ */
+import Badge from '~/components/ui/Badge.astro';
+import Section from '~/components/ui/Section.astro';
+import { visit } from '~/content/site';
+import { reduceMotionFrameUrl } from '~/lib/petFrames';
+---
+
+<Section
+  id="visit"
+  tone="sidebar"
+  eyebrow="串门 · 一次往来"
+  heading={visit.heading}
+  body={visit.body}
+>
+  <ul class="mt-8 grid gap-4 sm:grid-cols-2">
+    {
+      visit.directions.map((direction) => (
+        <li class="rounded-card border border-line bg-surface p-5 shadow-card">
+          <h3 class="text-base font-semibold text-ink">{direction.label}</h3>
+          <p class="mt-1.5 text-sm leading-relaxed text-muted">{direction.detail}</p>
+        </li>
+      ))
+    }
+  </ul>
+
+  <div class="mt-6 rounded-card border border-line bg-surface p-6 shadow-card">
+    <h3 class="text-base font-semibold text-ink">{visit.choreographyTitle}</h3>
+    {/* 窄屏排三列而不是横向滚动，避免整页出现横向滚动条。 */}
+    <ol class="mt-6 grid grid-cols-3 gap-x-3 gap-y-6 sm:grid-cols-5">
+      {
+        visit.choreography.map((stage, index) => (
+          <li class="text-center">
+            <img
+              src={reduceMotionFrameUrl('retriever-yellow', stage.clip)}
+              alt=""
+              width="72"
+              height="72"
+              loading="lazy"
+              data-pet-frame
+              class={`mx-auto size-[72px] ${stage.facing === 'left' ? '-scale-x-100' : ''}`}
+            />
+            <p class="mt-1 text-[13px] font-semibold text-ink">
+              <span class="text-faint tabular-nums">{index + 1}</span>
+              {' '}
+              {stage.label}
+            </p>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+
+  <div class="mt-6 rounded-card border border-line bg-surface p-6 shadow-card">
+    <h3 class="text-base font-semibold text-ink">{visit.interactionsTitle}</h3>
+
+    <div class="mt-5">
+      <p class="text-sm font-semibold text-muted">{visit.commonActionsTitle}</p>
+      <ul class="mt-2.5 flex flex-wrap gap-2">
+        {
+          visit.commonActions.map((action) => (
+            <li>
+              <Badge>{action}</Badge>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+
+    <div class="mt-6 border-t border-line pt-6">
+      <p class="text-sm font-semibold text-ink">{visit.guestOnlyTitle}</p>
+      <ul class="mt-3 grid gap-3 sm:grid-cols-3">
+        {
+          visit.guestOnlyActions.map((action) => (
+            <li class="rounded-card bg-canvas p-4">
+              <Badge tone="coral">{action.label}</Badge>
+              <p class="mt-2.5 text-sm leading-relaxed text-muted">{action.detail}</p>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </div>
+
+  <div class="mt-6 rounded-card border border-line bg-surface p-6 shadow-card">
+    <h3 class="text-base font-semibold text-ink">{visit.rulesTitle}</h3>
+    <ul class="mt-5 grid gap-x-10 gap-y-5 sm:grid-cols-2">
+      {
+        visit.rules.map((rule) => (
+          <li>
+            <h4 class="text-sm font-semibold text-ink">{rule.label}</h4>
+            <p class="mt-1 text-sm leading-relaxed text-muted">{rule.detail}</p>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+
+  <ul class="mt-8 grid gap-x-10 gap-y-3 sm:grid-cols-2">
+    {
+      visit.details.map((item) => (
+        <li class="flex gap-2.5 text-sm leading-relaxed text-muted">
+          <span class="mt-[7px] size-1.5 shrink-0 rounded-full bg-coral" aria-hidden="true" />
+          <span>{item}</span>
+        </li>
+      ))
+    }
+  </ul>
+</Section>

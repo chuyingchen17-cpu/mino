@@ -1,8 +1,10 @@
 ---
 /**
- * 安装区。紧接首屏，因为「装上」就是用户的真实下一步。
+ * 安装区。排在已经把产品讲完之后，不在首屏后面——
+ * 刚进来的人先看到一串终端命令和三条「未签名」警告只会把人吓跑，
+ * 想立刻装的人从 Hero 主按钮一键就到这里。
  *
- * 诚实披露（未签名、需要 Control 单击、换构建要重新登录）直接展开显示，不折叠隐藏。
+ * 诚实披露（没有发行签名、需要 Control 单击、装新版本要重新登录）直接展开显示，不折叠隐藏。
  */
 import Icon from '~/components/ui/Icon.astro';
 import Section from '~/components/ui/Section.astro';
@@ -10,7 +12,7 @@ import InstallCommand from '~/components/interactive/InstallCommand.astro';
 import { install } from '~/content/site';
 ---
 
-<Section id="install" tone="sidebar" eyebrow="安装" heading={install.heading} body={install.body}>
+<Section id="install" tone="canvas" eyebrow="安装" heading={install.heading} body={install.body}>
   {/*
     单列时也要显式写 minmax(0,...)：命令用 whitespace-pre 不换行，
     auto 轨道会被它的 max-content 撑到比容器还宽，导致整页横向滚动。
@@ -30,9 +32,15 @@ import { install } from '~/content/site';
       <div class="mt-6 space-y-3">
         <details class="group rounded-card border border-line bg-surface">
           <summary
-            class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-ink transition-colors duration-200 hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+            class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-ink transition-colors duration-200 hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             {install.tag.label}
+            {/* 箭头是这一行唯一的「可以展开」信号，没有它就只是个空白框。 */}
+            <Icon
+              name="chevron-down"
+              size={16}
+              class="shrink-0 text-faint transition-transform duration-200 group-open:rotate-180"
+            />
           </summary>
           <div class="border-t border-line p-3">
             <InstallCommand
@@ -44,9 +52,14 @@ import { install } from '~/content/site';
 
         <details class="group rounded-card border border-line bg-surface">
           <summary
-            class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-ink transition-colors duration-200 hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+            class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-ink transition-colors duration-200 hover:text-coral focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             {install.source.label}
+            <Icon
+              name="chevron-down"
+              size={16}
+              class="shrink-0 text-faint transition-transform duration-200 group-open:rotate-180"
+            />
           </summary>
           <div class="space-y-3 border-t border-line p-3">
             <InstallCommand
@@ -63,7 +76,7 @@ import { install } from '~/content/site';
     <aside class="rounded-card border border-line bg-surface p-6 shadow-card">
       <h3 class="flex items-center gap-2 text-base font-semibold text-ink">
         <Icon name="circle-alert" size={17} class="text-warning" />
-        装之前需要知道
+        安装前须知
       </h3>
       <ul class="mt-4 space-y-3">
         {

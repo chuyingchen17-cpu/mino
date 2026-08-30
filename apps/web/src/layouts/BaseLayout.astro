@@ -41,19 +41,15 @@ const { title, description, path = '/', structuredData = 'none', preloadImage } 
 
       document.addEventListener('click', (event) => {
         const target = event.target as HTMLElement | null;
-        const trigger = target?.closest<HTMLElement>(
-          '[data-track-cta], [data-track-github], [data-track-docs]',
-        );
+        const trigger = target?.closest<HTMLElement>('[data-track-cta], [data-track-github]');
         if (!trigger) return;
 
-        const { trackCta, trackGithub, trackDocs } = trigger.dataset;
+        const { trackCta, trackGithub } = trigger.dataset;
 
         if (trackCta) {
           track('cta_click', { location: trackCta, label: trigger.textContent?.trim() });
         } else if (trackGithub) {
           track('github_click', { location: trackGithub });
-        } else if (trackDocs) {
-          track('docs_click', { doc: trackDocs });
         }
       });
     </script>

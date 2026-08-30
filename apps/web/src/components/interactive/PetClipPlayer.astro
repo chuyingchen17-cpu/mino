@@ -7,8 +7,11 @@
  *
  * 所有帧在构建期就渲染成 stacked <img>，播放时只切 opacity：
  * 换 src 会在解码期间闪一下白，切 opacity 不会。
- * 前提是每一帧都得先下载好，所以后续帧也用 eager，只把
+ * 前提是每一帧都得先下载好，所以首屏的播放器后续帧也用 eager，只把
  * fetchpriority 降到 low，避免和首屏 LCP 抢带宽。
+ *
+ * 首屏之外的播放器改用 lazy：帧图一共 3.6MB，页面上十几个播放器全 eager
+ * 会在首次进站就把整份美术拉下来。
  */
 import { clipMeta, frameUrls, type CharacterId, type ClipId } from '~/lib/petFrames';
 
@@ -20,6 +23,8 @@ interface Props {
   trigger?: 'auto' | 'hover' | 'click';
   /** 首屏 LCP 那一帧用 eager + sync 解码，让它尽早上屏。 */
   eager?: boolean;
+  /** 关掉后整段帧序列交给浏览器懒加载，用于首屏以下的播放器。 */
+  preload?: boolean;
   label?: string;
   class?: string;
 }
@@ -30,6 +35,7 @@ const {
   size = 160,
   trigger = 'auto',
   eager = false,
+  preload = true,
   label,
   class: className = '',
 } = Astro.props;
@@ -62,7 +68,7 @@ const Tag = trigger === 'auto' ? 'div' : 'button';
         height={size}
         data-pet-frame
         data-frame-index={index}
-        loading="eager"
+        loading={preload ? 'eager' : 'lazy'}
         fetchpriority={index === 0 ? undefined : 'low'}
         decoding={eager && index === 0 ? 'sync' : 'async'}
         class="absolute inset-0 size-full"

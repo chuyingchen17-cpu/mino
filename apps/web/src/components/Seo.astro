@@ -4,7 +4,7 @@
  * 结构化数据按页面类型注入，没有真实价格时不写 offers。
  */
 import { site } from '~/content/site';
-import { requirements } from '~/content/site';
+import { faq, requirements } from '~/content/site';
 
 interface Props {
   title: string;
@@ -12,7 +12,7 @@ interface Props {
   /** 相对路径，例如 "/" 或 "/changelog"。 */
   path?: string;
   ogImage?: string;
-  /** 首页注入 SoftwareApplication + Organization。 */
+  /** 首页注入 SoftwareApplication + Organization + FAQPage。 */
   structuredData?: 'home' | 'none';
 }
 
@@ -47,6 +47,24 @@ const organization = {
   name: site.name,
   url: site.url,
   sameAs: [site.repo],
+};
+
+/**
+ * FAQPage 直接用页面上那一组问答，不另写一份——
+ * 结构化数据跟可见内容不一致会被当成 cloaking。
+ * 带 list 的那条把列表拼进答案，否则爬虫只能拿到“列在这里”这半句话。
+ */
+const faqPage = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faq.items.map((item) => ({
+    '@type': 'Question',
+    name: item.q,
+    acceptedAnswer: {
+      '@type': 'Answer',
+      text: 'list' in item ? `${item.a}${item.list.join('、')}。` : item.a,
+    },
+  })),
 };
 ---
 
@@ -89,6 +107,7 @@ const organization = {
         type="application/ld+json"
         set:html={JSON.stringify(organization)}
       />
+      <script is:inline type="application/ld+json" set:html={JSON.stringify(faqPage)} />
     </>
   )
 }

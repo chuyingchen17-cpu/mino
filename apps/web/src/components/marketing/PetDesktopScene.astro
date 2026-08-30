@@ -41,11 +41,15 @@ const actions: { label: string; icon: IconName }[] = [
 
   {/* 桌面区域 */}
   <div class="relative flex min-h-[300px] flex-col items-center justify-end gap-3 px-6 pt-8 pb-10">
-    {/* 即时回应气泡：最多两行，默认显示 2.4s */}
+    {/*
+      即时回应气泡：最多两行，默认显示 2.4s。
+      这句是 App 里的真实台词（MinoAgent/DeterministicInteractionResponseProvider.swift:41），
+      不在页面上另编一句。
+    */}
     <div
       class="max-w-[224px] rounded-[18px] border border-line bg-surface-raised px-4 py-2.5 text-center text-[13px] leading-snug text-ink shadow-card"
     >
-      被摸到了，尾巴摇了一下。
+      嗯，就这样再待一会儿。
     </div>
 
     {/* 贴身操作条：固定 252 × 42pt，四个固定入口 */}

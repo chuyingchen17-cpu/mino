@@ -1,0 +1,83 @@
+---
+/**
+ * 演示区。紧跟 Hero，是页面上最强的产品证明。
+ *
+ * 这一段不能只用文字说「不等网络」——四个演示都能当场点，播放的是 App 里同一份帧序列，
+ * 气泡文案也是 App 里同一句。气泡停留 2.4 秒，与产品里的默认时长一致。
+ */
+import Section from '~/components/ui/Section.astro';
+import PetClipPlayer from '~/components/interactive/PetClipPlayer.astro';
+import { demo } from '~/content/site';
+---
+
+<Section id="demo" eyebrow="演示" heading={demo.heading} body={demo.body}>
+  <p class="mt-6 text-sm font-semibold text-coral">{demo.hint}</p>
+
+  <ul class="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
+    {
+      demo.items.map((item) => (
+        <li class="rounded-card border border-line bg-surface p-4 shadow-card sm:p-5">
+          <div class="relative flex justify-center" data-demo>
+            {/*
+              气泡绝对定位：它出现和消失时不能把下面的文字顶来顶去。
+            */}
+            <p
+              role="status"
+              data-demo-bubble
+              class="pointer-events-none absolute -top-1 left-1/2 z-10 w-max max-w-[180px] -translate-x-1/2 rounded-[14px] border border-line bg-surface-raised px-3 py-1.5 text-center text-xs leading-snug text-ink opacity-0 shadow-card transition-opacity duration-200"
+            >
+              {item.speech}
+            </p>
+
+            <PetClipPlayer
+              character="maltese-white"
+              clip={item.clip}
+              size={128}
+              trigger="click"
+              preload={false}
+              label={`播放${item.label}动作`}
+            />
+          </div>
+
+          <h3 class="mt-2 text-center text-base font-semibold text-ink">{item.label}</h3>
+          <p class="mt-1.5 text-center text-[13px] leading-relaxed text-muted">{item.detail}</p>
+        </li>
+      ))
+    }
+  </ul>
+
+  <ul class="mt-10 grid gap-x-10 gap-y-3 sm:grid-cols-2">
+    {
+      demo.details.map((item) => (
+        <li class="flex gap-2.5 text-sm leading-relaxed text-muted">
+          <span class="mt-[7px] size-1.5 shrink-0 rounded-full bg-coral" aria-hidden="true" />
+          <span>{item}</span>
+        </li>
+      ))
+    }
+  </ul>
+</Section>
+
+<script>
+  /**
+   * 气泡跟着点击出现，2.4 秒后收起——和 App 里的默认停留时长同一个数。
+   * 播放器自己的脚本负责推进帧，这里只管气泡，两者互不干扰。
+   */
+  const SPEECH_DURATION_MS = 2400;
+
+  document.querySelectorAll<HTMLElement>('[data-demo]').forEach((demo) => {
+    const bubble = demo.querySelector<HTMLElement>('[data-demo-bubble]');
+    if (!bubble) return;
+
+    let timer: number | undefined;
+
+    demo.addEventListener('click', () => {
+      // 连点时重新计时，而不是让上一次的定时器提前把气泡收走。
+      window.clearTimeout(timer);
+      bubble.style.opacity = '1';
+      timer = window.setTimeout(() => {
+        bubble.style.opacity = '0';
+      }, SPEECH_DURATION_MS);
+    });
+  });
+</script>
