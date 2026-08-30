@@ -250,6 +250,20 @@ final class PetInteractionView: SKView {
 package final class PetWindowController {
     package static let windowSize = CGSize(width: 170, height: 180)
 
+    /// 桌宠精灵画布顶边距窗口顶边的距离。
+    ///
+    /// `PetScene` 把 avatar 放在 y=94，精灵画布 120×120 以此为中心，所以画布顶边在
+    /// 场景 y=154，也就是窗口顶边往下 26pt。
+    private static let petArtTopInset: CGFloat = windowSize.height - (94 + 120 / 2)
+
+    /// 气泡尾尖距窗口顶边的距离。
+    ///
+    /// 画面在画布内还有一段顶部透明留白，且随动作而异。实测 34 个动作：留白最少的
+    /// 是 `retriever-yellow/pet_receive` 的 11.5pt（有只手从上方伸进来），多的接近 30pt。
+    /// 单一锚点没法对所有动作都贴紧，所以按“最紧的那个动作也不被压到”定：
+    /// 留 8pt 让量，待机等常见动作则自然隔出约 20pt。
+    private static let speechTailInset: CGFloat = petArtTopInset + 8
+
     package let id: PetID
     private let panel: PetPanel
     private let scene: PetScene
@@ -410,18 +424,47 @@ package final class PetWindowController {
         duration: TimeInterval = MinoDesign.Motion.petFeedbackDuration
     ) {
         guard let speechPanel,
-              let label = speechPanel.contentView?.viewWithTag(200) as? NSTextField else { return }
+              let bubble = speechPanel.contentView as? PetSpeechBubbleView else { return }
         speechTask?.cancel()
-        label.stringValue = text
+        bubble.text = text
+        // 气泡和动作条挤在桌宠头顶同一片地方，一起出现会互相压。说话期间先收掉
+        // 动作条，说完再按指针位置决定要不要放回来。
+        actionBarShowTask?.cancel()
+        actionPanel?.orderOut(nil)
+        // 先改尺寸再定位：positionAccessoryPanels 要按新宽度算居中和尾巴位置。
+        speechPanel.setContentSize(PetSpeechBubbleView.size(for: text))
         positionAccessoryPanels()
+        // 窗口阴影是按旧形状缓存的，改过尺寸必须作废，不然会拖着上一句的轮廓。
+        speechPanel.invalidateShadow()
         speechPanel.orderFrontRegardless()
-        speechTask = Task { @MainActor [weak speechPanel] in
+        speechTask = Task { @MainActor [weak self] in
             do {
                 try await Task.sleep(for: .seconds(duration))
             } catch {
                 return
             }
-            speechPanel?.orderOut(nil)
+            guard let self else { return }
+            self.speechPanel?.orderOut(nil)
+            // 说话期间动作条被收走了，而指针可能一直没动——不会再有 hover 回调，
+            // 所以这里主动判一次。不能用 refreshHoverStateFromPointer：它要求动作条
+            // 可见才算悬停，而此刻动作条正被收着，指针又常常就停在刚点过的那个按钮上。
+            let restoresActionBar: Bool
+            if usesSyntheticHoverState {
+                restoresActionBar = isPetHovered || isActionBarHovered
+            } else {
+                let pointer = NSEvent.mouseLocation
+                restoresActionBar = panel.frame.contains(pointer)
+                    || actionPanel?.frame.contains(pointer) == true
+            }
+            guard restoresActionBar, panel.isVisible else { return }
+            // 直接显示而不走 scheduleActionBarPresentation：后者是为“指针刚移进来”设计的，
+            // 要延迟还要求 isPetHovered，指针停在动作条上时它会直接放弃。
+            positionAccessoryPanels()
+            actionPanel?.orderFrontRegardless()
+            // 动作条重新可见了，现在重读才能把悬停标记算对，交回给正常的消失逻辑。
+            if !usesSyntheticHoverState {
+                refreshHoverStateFromPointer()
+            }
         }
     }
 
@@ -466,6 +509,8 @@ package final class PetWindowController {
     private func scheduleActionBarPresentation() {
         actionBarHideTask?.cancel()
         guard actionPanel?.isVisible != true else { return }
+        // 说话期间不要把动作条推回来，否则又和气泡叠在一起。
+        guard speechPanel?.isVisible != true else { return }
         actionBarShowTask?.cancel()
         actionBarShowTask = Task { @MainActor [weak self] in
             do {
@@ -566,7 +611,10 @@ package final class PetWindowController {
 
     private func configureSpeechPanel() {
         let accessory = PetPanel(
-            contentRect: CGRect(origin: .zero, size: MinoDesign.Size.petSpeechBubble),
+            contentRect: CGRect(
+                origin: .zero,
+                size: CGSize(width: MinoDesign.Size.petSpeechMinWidth, height: 44)
+            ),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -577,30 +625,10 @@ package final class PetWindowController {
         accessory.level = .floating
         accessory.collectionBehavior = panel.collectionBehavior
         accessory.ignoresMouseEvents = true
-
-        let bubble = NSVisualEffectView(frame: accessory.contentView?.bounds ?? .zero)
-        bubble.material = .popover
-        bubble.state = .active
-        bubble.wantsLayer = true
-        bubble.layer?.cornerRadius = MinoDesign.Radius.speechBubble
-        bubble.layer?.masksToBounds = true
-        bubble.autoresizingMask = [.width, .height]
-        let label = NSTextField(labelWithString: "")
-        label.tag = 200
-        label.font = .systemFont(ofSize: 13, weight: .medium)
-        label.textColor = .labelColor
-        label.alignment = .center
-        label.maximumNumberOfLines = 2
-        label.lineBreakMode = .byTruncatingTail
-        label.translatesAutoresizingMaskIntoConstraints = false
-        bubble.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 14),
-            label.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -14),
-            label.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 9),
-            label.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -9)
-        ])
-        accessory.contentView = bubble
+        // 真实尺寸每次 showSpeech 重算，这里只给个占位。
+        accessory.contentView = PetSpeechBubbleView(
+            frame: accessory.contentView?.bounds ?? .zero
+        )
         speechPanel = accessory
     }
 
@@ -622,11 +650,22 @@ package final class PetWindowController {
             max(panel.frame.midX - speechSize.width / 2, screen.visibleFrame.minX + 8),
             screen.visibleFrame.maxX - speechSize.width - 8
         )
-        let speechY = min(actionY + actionSize.height + 6, screen.visibleFrame.maxY - speechSize.height - 8)
-        speechPanel?.setFrameOrigin(Self.quantizedPoint(
+        // 气泡贴着桌宠头顶，不再摞在动作条上方——说话时动作条本来就收走了，
+        // 摞上去只会把气泡推到离头顶将近 100pt 远的地方。
+        let speechY = min(
+            panel.frame.maxY - Self.speechTailInset,
+            screen.visibleFrame.maxY - speechSize.height - 8
+        )
+        let speechOrigin = Self.quantizedPoint(
             CGPoint(x: speechX, y: speechY),
             backingScaleFactor: scale
-        ))
+        )
+        speechPanel?.setFrameOrigin(speechOrigin)
+        // 气泡贴到屏幕边缘被夹住时它不再居中，尾巴要改成按桌宠中线算，
+        // 否则尖角会指向旁边的空地。
+        if let bubble = speechPanel?.contentView as? PetSpeechBubbleView {
+            bubble.tailCenterX = panel.frame.midX - speechOrigin.x
+        }
     }
 
     package static func quantizedOrigin(

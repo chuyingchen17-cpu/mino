@@ -36,7 +36,9 @@ enum MinoDesign {
         static let contentMax: CGFloat = 720
         static let formMax: CGFloat = 560
         static let petActionBar = CGSize(width: 252, height: 42)
-        static let petSpeechBubble = CGSize(width: 224, height: 58)
+        /// 说话气泡按文字量伸缩，只约束上下限：太窄会把短句拆行，太宽会横穿桌面。
+        static let petSpeechMinWidth: CGFloat = 92
+        static let petSpeechMaxWidth: CGFloat = 264
     }
 
     enum Typography {
