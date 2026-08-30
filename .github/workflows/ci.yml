@@ -92,7 +92,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           files=(apps/macos/.build/Mino-unsigned.zip apps/macos/.build/Mino-unsigned.zip.sha256)
-          notes="Ad-hoc unsigned macOS build from ${GITHUB_SHA:0:7}. Not Developer ID signed. Install: curl -fsSL https://raw.githubusercontent.com/liyown/mino/main/Scripts/install.sh | zsh"
+          notes="Ad-hoc unsigned macOS build from ${GITHUB_SHA:0:7}. Not Developer ID signed. Install: curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/Scripts/install.sh | zsh"
           if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
             gh release create "$GITHUB_REF_NAME" "${files[@]}" \
               --prerelease \
