@@ -121,7 +121,6 @@ public final class PetWorld: NSObject {
     private var parkedOffscreenPets: Set<PetID> = []
     private var activeInteraction: ActivePairedInteraction?
     private var motionDisplayLink: CADisplayLink?
-    private var ambientTimer: Timer?
     private var lastMotionTime = ProcessInfo.processInfo.systemUptime
     public var onInteractionCue: ((InteractionCue) -> Void)?
 
@@ -138,20 +137,14 @@ public final class PetWorld: NSObject {
         super.init()
     }
 
+    /// 宠物只在被交互时才动，不会自己在桌面上漫游，所以这里没有环境定时器：
+    /// 位置完全由拖拽和显式动作决定，静止时连运动 display link 都不会启动。
     public func start() {
         publish()
-        ambientTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.scheduleAmbientWalks()
-            }
-        }
-        ambientTimer?.tolerance = 0.6
     }
 
     public func stop() {
-        ambientTimer?.invalidate()
         motionDisplayLink?.invalidate()
-        ambientTimer = nil
         motionDisplayLink = nil
     }
 
@@ -557,14 +550,6 @@ public final class PetWorld: NSObject {
         publish()
     }
 
-    private func scheduleAmbientWalks() {
-        guard targets.isEmpty, activeInteraction == nil else { return }
-        for id in PetID.allCases
-        where !isAmbientMovementPaused(id) && Double.random(in: 0...1) < 0.45 {
-            scheduleWalk(for: id, isExplicit: false)
-        }
-    }
-
     private func scheduleWalk(for id: PetID, isExplicit: Bool) {
         guard let pet = pets[id] else { return }
         guard !parkedOffscreenPets.contains(id) else { return }
@@ -574,9 +559,11 @@ public final class PetWorld: NSObject {
         let frame = visibleFrameProvider(pet.position).insetBy(dx: 90, dy: 90)
         guard frame.width > 0, frame.height > 0 else { return }
 
+        // 只在当前高度上左右走。桌面上没有可见地面，一旦纵向移动就会被看成
+        // 悬空起跳，而 walk 动画本身也只画了侧向迈步。
         let target = CGPoint(
             x: CGFloat.random(in: frame.minX...frame.maxX),
-            y: CGFloat.random(in: frame.minY...(frame.minY + min(120, frame.height)))
+            y: pet.position.y
         )
         scheduleWalk(for: id, to: target, isExplicit: isExplicit)
     }
@@ -842,12 +829,6 @@ public final class PetWorld: NSObject {
 
     private func publish() {
         onStateChange?(pets)
-    }
-
-    private func isAmbientMovementPaused(_ id: PetID) -> Bool {
-        hoveredPets.contains(id)
-            || waitingForRemoteAgentPets.contains(id)
-            || parkedOffscreenPets.contains(id)
     }
 
     private func isMovementPaused(_ id: PetID) -> Bool {
