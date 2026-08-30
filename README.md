@@ -39,8 +39,6 @@ nightly 只在 `main` 的测试和 release 都通过后更新。仓库还没有 
 本地已经有仓库的话：
 
 ```sh
-git clone https://github.com/chuyingchen17-cpu/mino.git
-cd mino
 Scripts/install-app.sh --release --open
 ```
 
@@ -92,7 +90,7 @@ mise //apps/worker:dev
 
 ## 工作方式
 
-```
+```text
 macOS 客户端 ── HTTPS / WSS ── Cloudflare Worker
   本地动画与回应                 身份、好友、养成、串门
   持久 outbox                    D1 保存事实
@@ -101,7 +99,7 @@ macOS 客户端 ── HTTPS / WSS ── Cloudflare Worker
 
 客户端始终用事件游标和 bootstrap 对账，不把 WebSocket 当成事实来源。协议见 [`apps/worker/openapi.yaml`](apps/worker/openapi.yaml)。
 
-```
+```text
 apps/macos/     Swift 客户端
 apps/worker/    Cloudflare Worker
 Scripts/        构建、测试、安装

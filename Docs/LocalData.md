@@ -24,7 +24,7 @@ Debug 双客户端通过 `MINO_CLIENT_PROFILE=alice|bob` 选择独立命名空�
 
 Credential 的日志描述始终 redact token。Agent memory 的 256-bit AES key 使用独立 Keychain item；session token、refresh token 和 memory key 不写入 Info.plist、明文 JSON 或日志。Device revoke 或 refresh 失败后客户端清除不可用 credential 并重新认证。
 
-ad-hoc 开发包没有稳定的 Keychain designated requirement，因此不访问上述 Keychain item。它在当前 profile 下创建按可执行文件 CDHash 隔离的 `local-security.executable.<hash>/`：随机密钥和 AES-GCM 会话密文分别保存为 `0600` 文件，目录为 `0700`，写入使用原子替换。相同 app 重开可恢复会话；重新构建后进入新的隔离目录并需要重新登录。没有开发者身份时：`curl -fsSL https://raw.githubusercontent.com/liyown/mino/main/Scripts/install.sh | zsh` 安装 CI nightly，或 `Scripts/install-app.sh` 从源码装到 `~/Applications/Mino.app`。该降级只服务本机运行，不替代发行签名。
+ad-hoc 开发包没有稳定的 Keychain designated requirement，因此不访问上述 Keychain item。它在当前 profile 下创建按可执行文件 CDHash 隔离的 `local-security.executable.<hash>/`：随机密钥和 AES-GCM 会话密文分别保存为 `0600` 文件，目录为 `0700`，写入使用原子替换。相同 app 重开可恢复会话；重新构建后进入新的隔离目录并需要重新登录。没有开发者身份时：`curl -fsSL https://raw.githubusercontent.com/chuyingchen17-cpu/mino/main/Scripts/install.sh | zsh` 安装 CI nightly，或 `Scripts/install-app.sh` 从源码装到 `~/Applications/Mino.app`。该降级只服务本机运行，不替代发行签名。
 
 ## Account Event Cursor
 
