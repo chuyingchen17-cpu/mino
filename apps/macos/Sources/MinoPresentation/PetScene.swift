@@ -7,8 +7,13 @@ final class PetScene: SKScene {
     /// `avatar` is itself the world anchor and owns only a fixed shadow plus a
     /// pose-only body container. The scene never adds a second hop/bounce owner.
     private let avatar = PetAvatarNode()
-    private let nameBadge = SKShapeNode(rectOf: CGSize(width: 78, height: 25), cornerRadius: 12.5)
+    private let nameBadge = SKShapeNode()
     private let nameLabel = SKLabelNode()
+
+    private static let nameBadgeHeight: CGFloat = 25
+    private static let nameBadgeMinWidth: CGFloat = 44
+    private static let nameBadgeHorizontalPadding: CGFloat = 13
+    private var nameBadgeSourceText = ""
 
     override init(size: CGSize) {
         super.init(size: size)
@@ -26,9 +31,11 @@ final class PetScene: SKScene {
         nameLabel.fontSize = 12
         nameLabel.fontColor = .labelColor
         nameLabel.verticalAlignmentMode = .center
+        nameLabel.numberOfLines = 1
         nameLabel.position = nameBadge.position
         nameLabel.zPosition = 101
         addChild(nameLabel)
+        layoutNameBadge()
 
         avatar.position = restingPosition
         addChild(avatar)
@@ -43,6 +50,57 @@ final class PetScene: SKScene {
         avatar.position = restingPosition
         nameBadge.position = CGPoint(x: size.width / 2, y: 18)
         nameLabel.position = nameBadge.position
+        // 牌子宽度上限跟着场景宽度走，换了尺寸要重排。
+        layoutNameBadge()
+    }
+
+    /// 名字牌宽度跟着名字长短走。
+    ///
+    /// 原来写死 78pt：自己的桌宠牌子上还挂着“· 我”时刚好填满，去掉之后两个字的名字
+    /// 会在里面空一大片；而名字本来就能改，长一点又会顶出窗口，所以两头都要管。
+    private func layoutNameBadge() {
+        let maxWidth = max(Self.nameBadgeMinWidth, size.width - 16)
+        let maxTextWidth = maxWidth - Self.nameBadgeHorizontalPadding * 2
+        nameLabel.text = Self.name(nameBadgeSourceText, truncatedToFit: maxTextWidth, measuredBy: nameLabel)
+        let width = min(
+            maxWidth,
+            max(
+                Self.nameBadgeMinWidth,
+                ceil(nameLabel.frame.width) + Self.nameBadgeHorizontalPadding * 2
+            )
+        )
+        nameBadge.path = CGPath(
+            roundedRect: CGRect(
+                x: -width / 2,
+                y: -Self.nameBadgeHeight / 2,
+                width: width,
+                height: Self.nameBadgeHeight
+            ),
+            cornerWidth: Self.nameBadgeHeight / 2,
+            cornerHeight: Self.nameBadgeHeight / 2,
+            transform: nil
+        )
+    }
+
+    /// 自己裁，不能交给 SKLabelNode。
+    ///
+    /// 它的 `preferredMaxLayoutWidth` 配 `byTruncatingTail` 在单行下不生效：实测 14 个
+    /// 汉字的名字依旧报 170pt 宽，牌子跟着它算就会被文字铺出去。
+    private static func name(
+        _ name: String,
+        truncatedToFit maxWidth: CGFloat,
+        measuredBy label: SKLabelNode
+    ) -> String {
+        label.text = name
+        guard ceil(label.frame.width) > maxWidth else { return name }
+        var characters = Array(name)
+        while !characters.isEmpty {
+            characters.removeLast()
+            let candidate = String(characters) + "…"
+            label.text = candidate
+            if ceil(label.frame.width) <= maxWidth { return candidate }
+        }
+        return "…"
     }
 
     func render(
@@ -66,9 +124,18 @@ final class PetScene: SKScene {
             reduceMotion: reduceMotion,
             motionProgress: motionProgress
         )
-        nameLabel.text = state.id == .mine
-            ? "\(state.displayName)  ·  我"
+        // 自己的桌宠只显示名字：牌子就挂在它身上，不用再标一次“我”。来访的好友宠物
+        // 仍然标出来——两只同时在桌面上时得分得清哪只不是自己的。
+        let name = state.id == .mine
+            ? state.displayName
             : "\(state.displayName)  ·  TA"
+        setNameBadgeText(name)
+    }
+
+    private func setNameBadgeText(_ name: String) {
+        guard nameBadgeSourceText != name else { return }
+        nameBadgeSourceText = name
+        layoutNameBadge()
     }
 
     /// Explicit interaction choreography for paired giver/receiver actions.
