@@ -70,13 +70,17 @@ fi
 tmp="$(mktemp -d /tmp/mino-install.XXXXXX)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
+# 返回值走 stdout，所以这个函数里的进度提示必须写到 stderr。
+# 之前 "Downloading ..." 和 "SHA-256 ok" 用的是 stdout，调用处
+# zip_path="$(download_release)" 会把三行一起捕获，ditto -x -k 拿到的
+# 不是路径，一键安装每次都在解压这步失败。
 download_release() {
     local zip_url="https://github.com/${MINO_REPO}/releases/download/${MINO_RELEASE}/${MINO_ASSET}"
     local sum_url="${zip_url}.sha256"
     local zip_path="$tmp/$MINO_ASSET"
     local sum_path="$tmp/$MINO_ASSET.sha256"
 
-    echo "Downloading $zip_url"
+    echo "Downloading $zip_url" >&2
     if ! curl -fL --retry 3 --retry-delay 1 -o "$zip_path" "$zip_url"; then
         echo "没有找到可安装的包（${MINO_REPO} @ ${MINO_RELEASE}）。" >&2
         echo "CI 只在 main 测试通过后发布 nightly。也可从源码安装：" >&2
@@ -93,7 +97,7 @@ download_release() {
             echo "校验失败：下载的包与 SHA-256 不一致。" >&2
             exit 1
         fi
-        echo "SHA-256 ok"
+        echo "SHA-256 ok" >&2
     else
         echo "缺少 ${MINO_ASSET}.sha256，拒绝安装未校验的包。" >&2
         exit 1
