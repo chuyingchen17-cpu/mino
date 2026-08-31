@@ -14,13 +14,18 @@ import { finalCta } from '~/content/site';
 ---
 
 {/*
-  这里不用 Section：它没用到 Section 的标题槽，而 Section 的上 padding 会跟前一个
-  区块（常见问题）的下 padding 叠成双份，结果像中间漏了一屏内容。
-  上间距交给上一个区块，自己只管底部。
-  自身不设底色，用的是 body 的 canvas；常见问题现在是 sidebar，
+  这里不用 Section：Section 的上 padding 会跟前一个区块（常见问题）的下 padding
+  叠成双份，两个 --spacing-section-lg 就是 240px，中间像漏了一屏内容。
+  自身不设底色，用的是 body 的 canvas；常见问题是 sidebar，
   两者之间因此有一道明暗差，正好收住页面，不需要额外加线。
+
+  上 padding 给的是 Section 的一半左右，不能是 0：常见问题那 120px 下 padding
+  长在它自己的深色底里，明暗分界线之上，canvas 这侧一点余量都不剩，
+  卡片圆角会直接顶在分界线上。这里留出的是分界线到卡片之间的呼吸。
 */}
-<section class="pb-(--spacing-section) lg:pb-(--spacing-section-lg)">
+<section
+  class="pt-12 pb-(--spacing-section) lg:pt-16 lg:pb-(--spacing-section-lg)"
+>
   <Container>
     <div
       class="flex flex-col items-center gap-8 rounded-prominent border border-line bg-surface px-6 py-12 text-center shadow-card sm:px-12"
