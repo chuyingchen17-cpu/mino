@@ -82,14 +82,30 @@ download_release() {
 
     echo "Downloading $zip_url" >&2
     if ! curl -fL --retry 3 --retry-delay 1 -o "$zip_path" "$zip_url"; then
-        echo "没有找到可安装的包（${MINO_REPO} @ ${MINO_RELEASE}）。" >&2
-        echo "CI 只在 main 测试通过后发布 nightly。也可从源码安装：" >&2
-        echo "  git clone https://github.com/${MINO_REPO}.git" >&2
-        echo "  cd mino && Scripts/install-app.sh --release --open" >&2
-        exit 1
+        # curl 失败会留下一个残缺文件，不删掉下面的 SHA 校验会拿它去比对。
+        rm -f "$zip_path"
+        echo "直接下载失败，改用 GitHub CLI 重试。" >&2
+        # gh 走用户已有的登录态，能穿过匿名访问 release 资产被限流或拦截的网络。
+        # 它会顺带取回 .sha256，所以下面的校验分支要先认已经存在的文件。
+        # gh 的正常输出也重定向到 stderr：这个函数用 stdout 返回 zip 路径。
+        if ! command -v gh >/dev/null 2>&1 \
+            || ! gh auth status >/dev/null 2>&1 \
+            || ! gh release download "$MINO_RELEASE" \
+                --repo "$MINO_REPO" \
+                --pattern "$MINO_ASSET" \
+                --pattern "${MINO_ASSET}.sha256" \
+                --dir "$tmp" \
+                --clobber >&2; then
+            echo "没有找到可安装的包（${MINO_REPO} @ ${MINO_RELEASE}）。" >&2
+            echo "CI 只在 main 测试通过后发布 nightly。检查网络，或先 gh auth login 再重试。" >&2
+            echo "也可从源码安装：" >&2
+            echo "  git clone https://github.com/${MINO_REPO}.git" >&2
+            echo "  cd mino && Scripts/install-app.sh --release --open" >&2
+            exit 1
+        fi
     fi
 
-    if curl -fL --retry 3 --retry-delay 1 -o "$sum_path" "$sum_url"; then
+    if [[ -f "$sum_path" ]] || curl -fL --retry 3 --retry-delay 1 -o "$sum_path" "$sum_url"; then
         local expected actual
         expected="$(awk '{print $1}' "$sum_path")"
         actual="$(shasum -a 256 "$zip_path" | awk '{print $1}')"

@@ -8,8 +8,10 @@
   },
   "scripts": {
     "sync:frames": "node scripts/sync-pet-frames.mjs",
-    "dev": "npm run sync:frames && astro dev",
-    "build": "npm run sync:frames && astro build",
+    "sync:install": "node scripts/sync-install-script.mjs",
+    "sync": "npm run sync:frames && npm run sync:install",
+    "dev": "npm run sync && astro dev",
+    "build": "npm run sync && astro build",
     "preview": "astro preview",
     "typecheck": "astro check"
   },

@@ -24,12 +24,25 @@
  */
 const repoSlug = 'chuyingchen17-cpu/mino';
 
-/** 一键安装脚本的 raw 地址。仓库为 private 时这个地址对访客是 404。 */
-const installScriptUrl = `https://raw.githubusercontent.com/${repoSlug}/main/Scripts/install.sh`;
+/** 站点根地址。canonical、Open Graph、sitemap 和安装脚本地址都从这里派生。 */
+const siteUrl = 'https://mino.pet';
+
+/** CI 发布的 nightly 资产名，与 Scripts/install.sh 里 MINO_INSTALL_ASSET 的默认值一致。 */
+const releaseAsset = 'Mino-unsigned.zip';
+
+/**
+ * 一键安装脚本的地址，指向站点自己的 /install.sh。
+ * 这个文件由 scripts/sync-install-script.mjs 在构建时从 Scripts/install.sh 复制过来。
+ *
+ * 不用 raw.githubusercontent 的地址有两个原因：那串路径把 GitHub 的目录结构暴露在
+ * 对外文案里，而且仓库一旦转为 private 就对访客 404。
+ * 代价是这一份跟着站点发布走——改完 Scripts/install.sh 要连带部署产品页，否则线上是旧的。
+ */
+const installScriptUrl = `${siteUrl}/install.sh`;
 
 export const site = {
   name: 'Mino',
-  url: 'https://mino.pet',
+  url: siteUrl,
   repoSlug,
   repo: `https://github.com/${repoSlug}`,
   /** 一句话产品定义，用于 Hero 与 meta description 的共同基底。 */
@@ -432,13 +445,29 @@ export const privacy = {
 } as const;
 
 export const install = {
-  heading: '一条命令完成安装',
+  heading: '安装 Mino',
   body: `${requirements.os}，${requirements.chip}。${requirements.note}。`,
+  /**
+   * 直链下载，给不愿意把 curl 管进 zsh 的人。放在终端命令之前：
+   * 多数人到这一屏是来找下载按钮的，把它排在命令后面等于没有。
+   *
+   * note 不写「下载后解压即可安装」。实测这个包是 adhoc 签名
+   * （codesign 报 Signature=adhoc、TeamIdentifier not set，spctl 评估 rejected），
+   * 浏览器下载的 zip 还会被系统打上隔离属性，双击必然被 Gatekeeper 拦下。
+   * 终端脚本用 xattr -cr 清掉了隔离属性所以不用这一步，手动下载没有这道处理，
+   * 因此这条路必须把 Control 单击写在前面，不能说成开箱可用。
+   */
+  download: {
+    label: 'macOS · ZIP 安装包',
+    action: '直接下载 ZIP',
+    url: `${site.repo}/releases/download/nightly/${releaseAsset}`,
+    note: '解压后把 Mino.app 放进「应用程序」。首次打开要按住 Control 单击，详见「安装前须知」。',
+  },
   primary: {
     variant: 'nightly',
-    label: '安装 nightly',
+    label: '终端一键安装',
     command: `curl -fsSL ${installScriptUrl} | zsh`,
-    note: '脚本会下载最新构建、校验哈希，安装到 ~/Applications/Mino.app 并打开。',
+    note: '脚本会下载最新构建、校验 SHA-256、清除隔离属性，安装到 ~/Applications/Mino.app 并打开，不需要手动放行。',
   },
   tag: {
     variant: 'tag',
